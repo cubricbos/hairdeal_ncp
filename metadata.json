@@ -1,0 +1,8 @@
+{
+  "name": "ncp-api-migration: 헤어딜 딸깍",
+  "description": "ncp-api-migration 연동하기",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Hairdeal - AI 마케터 상시 상주 '헤어딜' 딸깍!</title>
+    <style>
+      /* Hide the original Google Translate element and top banner */
+      #google_translate_element { display: none; }
+      .goog-te-banner-frame.skiptranslate { display: none !important; }
+      body { top: 0px !important; }
+      .goog-tooltip { display: none !important; }
+      .goog-tooltip:hover { display: none !important; }
+      .goog-text-highlight { background-color: transparent !important; border: none !important; box-shadow: none !important; }
+    </style>
+  </head>
+  <body>
+    <div id="google_translate_element"></div>
+    <div id="root"></div>
+    
+    <script>
+      (async function() {
+        // IP-based or localStorage auto translation
+        let targetLang = localStorage.getItem('preferredLang');
+        
+        if (!targetLang) {
+          try {
+            const ipRes = await fetch('https://get.geojs.io/v1/ip/geo.json');
+            const geoData = await ipRes.json();
+            const country = geoData.country_code; // e.g. 'KR', 'US', 'JP'
+            
+            targetLang = 'ko';
+            if (country === 'JP') targetLang = 'ja';
+            else if (country !== 'KR') targetLang = 'en';
+            
+            localStorage.setItem('preferredLang', targetLang);
+          } catch(e) {
+            console.error("IP Geo Fetch Error for translation", e);
+            targetLang = 'ko';
+          }
+        }
+
+        const host = window.location.hostname;
+        // Always enforce the cookie matching targetLang from localStorage
+        if (targetLang && targetLang !== 'ko') {
+          document.cookie = `googtrans=/ko/${targetLang}; path=/;`;
+          document.cookie = `googtrans=/ko/${targetLang}; domain=${host}; path=/;`;
+          document.cookie = `googtrans=/ko/${targetLang}; domain=.${host}; path=/;`;
+        } else {
+          // If 'ko', clear the translation cookie so it defaults
+          document.cookie = `googtrans=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`;
+          document.cookie = `googtrans=; expires=Thu, 01 Jan 1970 00:00:00 UTC; domain=${host}; path=/;`;
+          document.cookie = `googtrans=; expires=Thu, 01 Jan 1970 00:00:00 UTC; domain=.${host}; path=/;`;
+        }
+        
+        // Load Google Translate script
+        window.googleTranslateElementInit = function() {
+          new google.translate.TranslateElement({
+            pageLanguage: 'ko', 
+            includedLanguages: 'ko,en,ja', 
+            autoDisplay: false
+          }, 'google_translate_element');
+        };
+        const script = document.createElement('script');
+        script.type = 'text/javascript';
+        script.src = '//translate.google.com/translate_a/element.js?cb=googleTranslateElementInit';
+        document.body.appendChild(script);
+      })();
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

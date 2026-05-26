@@ -1,0 +1,248 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  
+  --color-brand-primary: #6366F1;
+  --color-brand-accent: #EC4899;
+  --color-bg-base: #F8FAFC;
+  --color-text-dark: #0F172A;
+  --color-text-light: #64748B;
+  
+  --radius-xl: 1.5rem;
+  --radius-2xl: 2rem;
+  --radius-3xl: 2.5rem;
+
+  --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+  --shadow-2xl: 0 25px 50px -12px rgb(0 0 0 / 0.25);
+  --shadow-feature: 0 10px 25px rgba(0,0,0,0.03);
+}
+
+@layer base {
+  body {
+    @apply bg-bg-base text-text-dark font-sans antialiased;
+    word-break: keep-all;
+    overflow-wrap: break-word;
+  }
+  
+  h1, h2, h3, h4 {
+    @apply tracking-tight text-text-dark font-extrabold;
+    word-break: keep-all;
+  }
+}
+
+.gradient-text {
+  @apply bg-clip-text text-transparent bg-linear-to-r from-brand-primary to-brand-accent;
+}
+
+.animate-scroll-left {
+  animation: scroll-left 40s linear infinite;
+}
+
+.animation-pause:hover {
+  animation-play-state: paused;
+}
+
+@keyframes scroll-left {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-33.333333%); }
+}
+
+.glass-card {
+  @apply bg-white/80 backdrop-blur-xl border border-white/40 shadow-xl;
+}
+
+.blob {
+  @apply fixed rounded-full blur-[100px] -z-10 opacity-15 pointer-events-none;
+}
+
+.blob-1 { @apply w-[500px] h-[500px] bg-brand-primary -top-20 -right-20; }
+.blob-2 { @apply w-[400px] h-[400px] bg-brand-accent -bottom-20 -left-20; }
+
+@layer utilities {
+  .hide-scrollbar {
+    -ms-overflow-style: none; /* IE and Edge */
+    scrollbar-width: none; /* Firefox */
+  }
+  .hide-scrollbar::-webkit-scrollbar {
+    display: none; /* Chrome, Safari and Opera */
+  }
+}
+
+/* Prism Visual Studio Code Dark Theme - Optimized for High Readability with Vibrant Colors */
+.code-editor-dark {
+  background-color: #1e1e1e;
+  border-radius: 0 0 0.75rem 0.75rem;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', monospace !important;
+}
+
+.code-editor-dark textarea {
+  outline: none !important;
+  color: transparent !important;
+  caret-color: #ffffff !important;
+}
+
+.code-editor-dark code[class*="language-"],
+.code-editor-dark pre[class*="language-"] {
+  color: #abb2bf; /* Base text color (Light Gray) */
+  font-family: inherit !important;
+  text-align: left;
+  white-space: pre;
+  word-spacing: normal;
+  word-break: normal;
+  word-wrap: normal;
+  line-height: 1.6;
+  tab-size: 4;
+  hyphens: none;
+}
+
+/* Comments */
+.token.comment,
+.token.prolog,
+.token.doctype,
+.token.cdata {
+  color: #5c6370;
+  font-style: italic;
+}
+
+/* Punctuation & Symbols */
+.token.punctuation {
+  color: #abb2bf;
+}
+
+.token.namespace {
+  opacity: .7;
+}
+
+/* Tags & Keywords */
+.token.property,
+.token.tag,
+.token.boolean,
+.token.number,
+.token.constant,
+.token.symbol,
+.token.deleted {
+  color: #d19a66; /* Orange - Vibrant for numbers/bools */
+}
+
+.token.selector,
+.token.attr-name,
+.token.string,
+.token.char,
+.token.builtin,
+.token.inserted {
+  color: #98c379; /* Green - Vibrant for strings */
+}
+
+/* Operators, Entity, URL */
+.token.operator,
+.token.entity,
+.token.url,
+.language-css .token.string,
+.style .token.string {
+  color: #56b6c2; /* Cyan - Highly visible */
+}
+
+/* Keywords (if, else, for, etc.) */
+.token.atrule,
+.token.attr-value,
+.token.keyword {
+  color: #c678dd; /* Purple/Magenta - Distinctive */
+}
+
+/* Functions & Methods */
+.token.function {
+  color: #61afef; /* Sky Blue - Very Bright */
+}
+
+.token.regex,
+.token.important,
+.token.variable {
+  color: #e06c75; /* Salmon/Red - Eye-catching */
+}
+
+.token.important,
+.token.bold {
+  font-weight: bold;
+}
+
+.token.italic {
+  font-style: italic;
+}
+
+.token.entity {
+  cursor: help;
+}
+
+/* Classes & Types */
+.token.class-name {
+  color: #e5c07b; /* Gold/Yellow - Clear hierarchy */
+}
+
+/* Parameters */
+.token.parameter {
+  color: #d19a66;
+}
+
+/* CSS specific tokens for better styling logic */
+.language-css .token.property {
+  color: #9cdcfe; /* Light Blue for CSS properties */
+}
+
+.language-css .token.punctuation {
+  color: #d4d4d4;
+}
+
+.language-markup .token.tag .token.punctuation {
+  color: #808080;
+}
+
+.language-markup .token.tag .token.attr-name {
+  color: #9cdcfe;
+}
+
+.language-markup .token.tag .token.attr-value {
+  color: #ce9178; /* Vibrant Salmon for attribute values */
+}
+
+/* CSS specific tokens within HTML style attributes */
+.token.attr-value .token.punctuation.attr-equals + .token.string .token.property {
+  color: #9cdcfe;
+}
+
+.token.attr-value .token.punctuation.attr-equals + .token.string .token.value {
+  color: #ce9178;
+}
+
+/* Base text within the editor if not tokenized */
+.code-editor-dark pre, .code-editor-dark code {
+  color: #e0e0e0 !important;
+}
+
+/* Focus Mode Adjustments */
+div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section#solution:nth-of-type(3) {
+  padding-top: 0px !important;
+  padding-bottom: 0px !important;
+}
+
+div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section#solution:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) {
+  padding-bottom: 40px !important;
+  padding-top: 0px !important;
+}
+
+div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section#solution:nth-of-type(3) > div:nth-of-type(1) {
+  padding-top: 120px !important;
+}
+
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(4) > footer:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > h4:nth-of-type(1),
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(4) > footer:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > h4:nth-of-type(1),
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(4) > footer:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(4) > h4:nth-of-type(1) {
+  color: #ffffff !important;
+  text-shadow: 0 0 1px rgba(255, 255, 255, 0.4) !important;
+}
+
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(4) > footer:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > img:nth-of-type(1) {
+  filter: grayscale(100%) brightness(0.8) !important;
+  opacity: 0.8 !important;
+}

@@ -1,0 +1,2 @@
+ALTER TABLE public.shops ADD COLUMN IF NOT EXISTS top_banners JSONB DEFAULT '[]';
+ALTER TABLE public.shops ADD COLUMN IF NOT EXISTS bottom_banners JSONB DEFAULT '[]';

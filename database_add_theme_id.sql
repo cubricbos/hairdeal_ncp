@@ -1,0 +1,1 @@
+ALTER TABLE public.shops ADD COLUMN IF NOT EXISTS theme_id VARCHAR(50) DEFAULT 'purple';
