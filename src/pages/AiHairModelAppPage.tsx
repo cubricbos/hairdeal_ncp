@@ -20,6 +20,7 @@ import { uploadToStorage, waitForResult } from '../services/apiService';
 import { useSiteContext } from '../context/SiteContext';
 import AiPortfolioGrid from '../components/AiPortfolioGrid';
 import { checkAndRewardReferralActivity } from '../lib/referral';
+import { accountClient, apiClient } from '../lib/ncpClient';
 
 export default function AiHairModelAppPage({ user }: { user: User | null }) {
   const { settings } = useSiteContext();
@@ -215,15 +216,86 @@ export default function AiHairModelAppPage({ user }: { user: User | null }) {
   const [showCreditModal, setShowCreditModal] = useState(false);
 
   useEffect(() => {
+    const fetchProfile = async () => {
+      const token = localStorage.getItem('ncp_access_token');
+      if (!token) {
+        if (user) {
+          setUserName(user.user_metadata?.full_name || user.user_metadata?.name || '원장님');
+        }
+        return;
+      }
+      try {
+        const { data } = await accountClient.get('/designer/find/profile');
+        if (data && data.name) {
+          setUserName(data.name);
+        } else if (user) {
+          setUserName(user.user_metadata?.full_name || user.user_metadata?.name || '원장님');
+        }
+      } catch (err) {
+        console.warn('NCP 프로필 조회 실패 (비활성화 상태이거나 토큰 무효):', err);
+        if (user) {
+          setUserName(user.user_metadata?.full_name || user.user_metadata?.name || '원장님');
+        }
+      }
+    };
+    fetchProfile();
+  }, [user]);
+
+  useEffect(() => {
     const fetchCreditsInfo = async () => {
       if (user) {
-        setUserName(user.user_metadata?.full_name || '원장님');
+        // setUserName(user.user_metadata?.full_name || '원장님');
+        const token = localStorage.getItem('ncp_access_token');
+        if (token) {
+          try {
+            let currentNcpCredits: number | null = null;
+            try {
+              const res = await apiClient.get('/faceswap/credit');
+              if (res.data && res.data.credit !== undefined) {
+                currentNcpCredits = res.data.credit;
+              } else if (res.data && res.data.credits !== undefined) {
+                currentNcpCredits = res.data.credits;
+              }
+            } catch (e) {
+              try {
+                const res = await apiClient.get('/faceswap/credit/summary');
+                if (res.data && res.data.credit !== undefined) {
+                  currentNcpCredits = res.data.credit;
+                } else if (res.data && res.data.credits !== undefined) {
+                  currentNcpCredits = res.data.credits;
+                }
+              } catch (e2) {
+                try {
+                  const ncpRes = await accountClient.get('/designer/detail');
+                  if (ncpRes.data && ncpRes.data.credit !== undefined) {
+                    currentNcpCredits = ncpRes.data.credit;
+                  }
+                } catch (e3) {
+                  console.warn('Failed to retrieve NCP credits in AI Hair Model App Page from all paths', e3);
+                }
+              }
+            }
+
+            if (currentNcpCredits !== null) {
+              setUserCredits(currentNcpCredits);
+              // Keeps profiles.credits table in sync in background
+              supabase.from('profiles').update({ credits: currentNcpCredits }).eq('id', user.id).then();
+              
+              const { data: metrics } = await supabase.from('app_metrics').select('generation_credit_cost').eq('id', 1).single();
+              if (metrics && metrics.generation_credit_cost !== undefined) setGenerationCost(metrics.generation_credit_cost);
+              return; // Succeeded!
+            }
+          } catch (ncpErr) {
+            console.warn('Failed to fetch credits from NCP, falling back to Supabase', ncpErr);
+          }
+        }
+
         try {
            const { data: profile, error } = await supabase.from('profiles').select('credits, full_name').eq('id', user.id).single();
            let currentCredits = 0;
            if (!error && profile) {
              if (profile.credits !== undefined) currentCredits = profile.credits;
-             if (profile.full_name) setUserName(profile.full_name);
+             if (profile.full_name && !userName) setUserName(profile.full_name);
            }
 
            const { data: txs } = await supabase.from('credit_transactions').select('*').eq('user_id', user.id);
@@ -338,8 +410,53 @@ export default function AiHairModelAppPage({ user }: { user: User | null }) {
     try {
       if (user) {
          // Fetch LATEST balance from DB to prevent stale state issues
-         const { data: latestProfile } = await supabase.from('profiles').select('credits').eq('id', user.id).single();
-         const currentDBCredits = latestProfile?.credits ?? userCredits;
+         let currentDBCredits = userCredits;
+         const token = localStorage.getItem('ncp_access_token');
+         if (token) {
+           try {
+             let currentNcpCredits: number | null = null;
+             try {
+               const res = await apiClient.get('/faceswap/credit');
+               if (res.data && res.data.credit !== undefined) {
+                 currentNcpCredits = res.data.credit;
+               } else if (res.data && res.data.credits !== undefined) {
+                 currentNcpCredits = res.data.credits;
+               }
+             } catch (e) {
+               try {
+                 const res = await apiClient.get('/faceswap/credit/summary');
+                 if (res.data && res.data.credit !== undefined) {
+                   currentNcpCredits = res.data.credit;
+                 } else if (res.data && res.data.credits !== undefined) {
+                   currentNcpCredits = res.data.credits;
+                 }
+               } catch (e2) {
+                 try {
+                   const ncpRes = await accountClient.get('/designer/detail');
+                   if (ncpRes.data && ncpRes.data.credit !== undefined) {
+                     currentNcpCredits = ncpRes.data.credit;
+                   }
+                 } catch (e3) {
+                   console.warn('Failed to retrieve NCP credits in confirmGenerate (App)', e3);
+                 }
+               }
+             }
+             if (currentNcpCredits !== null) {
+               currentDBCredits = currentNcpCredits;
+             }
+           } catch (e) {
+             console.warn('Failed to parse latest credit from NCP:', e);
+           }
+         } else {
+           try {
+             const { data: latestProfile } = await supabase.from('profiles').select('credits').eq('id', user.id).single();
+             if (latestProfile) {
+               currentDBCredits = latestProfile.credits ?? userCredits;
+             }
+           } catch (e) {
+             console.warn('Failed to parse latest credit from Supabase:', e);
+           }
+         }
 
          if (currentDBCredits < generationCost) {
             alert(`크레딧이 부족합니다. (보유: ${currentDBCredits}C / 필요: ${generationCost}C)\n크레딧 충전 페이지를 이용해주세요.`);
@@ -349,13 +466,18 @@ export default function AiHairModelAppPage({ user }: { user: User | null }) {
 
          const newCredits = currentDBCredits - generationCost;
          setUserCredits(newCredits);
-         await supabase.from('profiles').update({ credits: newCredits }).eq('id', user.id);
-         await supabase.from('credit_transactions').insert([{
-            user_id: user.id,
-            type: 'spent',
-            amount: generationCost,
-            description: 'AI 헤어모델 생성'
-         }]);
+         
+         try {
+           await supabase.from('profiles').update({ credits: newCredits }).eq('id', user.id);
+           await supabase.from('credit_transactions').insert([{
+              user_id: user.id,
+              type: 'spent',
+              amount: generationCost,
+              description: 'AI 헤어모델 생성'
+           }]);
+         } catch (silentErr) {
+           console.warn("Silent syncing ignored in confirmGenerate App mode", silentErr);
+         }
          window.dispatchEvent(new Event('credits_updated'));
       }
 
@@ -761,6 +883,7 @@ export default function AiHairModelAppPage({ user }: { user: User | null }) {
       <AnimatePresence>
         {toastMessage && (
           <motion.div 
+            key="ai-app-toast"
             initial={{ opacity: 0, y: 50, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.9 }}
@@ -831,6 +954,13 @@ export default function AiHairModelAppPage({ user }: { user: User | null }) {
 
             {/* Content Container */}
             <div className={`flex flex-col pb-[80px] h-full pt-12 px-6`}>
+              <div className="mb-4 flex flex-col pt-2">
+                <h2 className="text-xl font-black text-gray-900 tracking-tight leading-tight">
+                  {userName ? `${userName} 원장님 환영합니다` : '원장님 환영합니다'}
+                </h2>
+                <p className="text-gray-500 text-sm mt-1">오늘도 멋진 스타일을 만들어보세요.</p>
+              </div>
+
               {/* Header */}
               <div className="flex justify-between items-center mb-5 shrink-0">
                  <div className="flex items-center gap-1.5">
@@ -917,8 +1047,8 @@ export default function AiHairModelAppPage({ user }: { user: User | null }) {
                                      <span className="mt-1">{resultCaption.caption.split('\n').slice(1).join('\n')}</span>
                                   </p>
                                   <div className="text-blue-900 mt-1.5 font-medium flex flex-wrap gap-1">
-                                     {resultCaption.tags.map(tag => (
-                                        <span key={tag}>#{tag}</span>
+                                     {resultCaption.tags.map((tag, idx) => (
+                                        <span key={`${tag}-${idx}`}>#{tag}</span>
                                      ))}
                                   </div>
                                </motion.div>

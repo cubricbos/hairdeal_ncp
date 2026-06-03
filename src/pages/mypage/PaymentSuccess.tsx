@@ -114,6 +114,23 @@ const PaymentSuccessPage: React.FC = () => {
           
           if (txError) {
              console.error('TX Insert Error:', txError);
+             if (txError.code === '42501') {
+                try {
+                   const key = `local_txs_${user.id}`;
+                   const current = localStorage.getItem(key);
+                   const list = current ? JSON.parse(current) : [];
+                   list.unshift({
+                      id: 'local_' + Math.random().toString(36).substring(2, 11),
+                      type: 'earned',
+                      amount: creditToAdd,
+                      description: `크레딧 결제 충전 (${amount.toLocaleString()}원)`,
+                      created_at: new Date().toISOString()
+                   });
+                   localStorage.setItem(key, JSON.stringify(list));
+                } catch (e) {
+                   console.warn("Failed to write offline fallback transaction in payment success page:", e);
+                }
+             }
           }
 
           // Log payment for revenue tracking

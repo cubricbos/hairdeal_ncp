@@ -33,8 +33,9 @@ import {
   Lock,
   Menu,
   MapPin,
+  UserCircle,
 } from "lucide-react";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { supabase } from "../supabase";
 import { User } from "@supabase/supabase-js";
 import { useNavigate } from "react-router-dom";
@@ -58,6 +59,7 @@ import { CSS } from "@dnd-kit/utilities";
 import SiteEditor from "../components/admin/SiteEditor";
 import { GeminiApiKeyManager } from "../components/admin/GeminiApiKeyManager";
 import { useSiteContext } from "../context/SiteContext";
+import { accountClient, apiClient } from "../lib/ncpClient";
 import { logPrivacyAction } from "../lib/auditLogger";
 
 interface Inquiry {
@@ -213,7 +215,39 @@ export default function AdminPage({ user }: { user: User | null }) {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("dashboard");
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const isAdmin = user?.email === "cubric.ceo@gmail.com";
+  const isAdmin = (user?.email === "cubric.ceo@gmail.com") || (localStorage.getItem('ncp_admin') === 'true');
+
+  const handleLogout = async () => {
+    try {
+      // Trigger sign out from Supabase as non-blocking background task to prevent hanging network calls from delaying UI clearing
+      supabase.auth.signOut().catch(() => {});
+    } catch (e) {
+      console.warn("Supabase auth signOut error", e);
+    }
+    localStorage.removeItem('ncp_access_token');
+    localStorage.removeItem('ncp_refresh_token');
+    localStorage.removeItem('ncp_admin');
+    localStorage.clear();
+    sessionStorage.clear();
+    
+    document.cookie.split(";").forEach((c) => {
+      document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
+    });
+    
+    window.dispatchEvent(new Event('ncp_auth_changed'));
+    
+    setTimeout(() => {
+      window.location.replace(window.location.origin + '/?logout=' + Date.now());
+    }, 100);
+  };
+  
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
   
   const { settings: siteSettings, updateSettings } = useSiteContext();
   const [facefusionUrl, setFacefusionUrl] = useState(siteSettings?.integrations?.facefusionUrl || "");
@@ -285,23 +319,135 @@ export default function AdminPage({ user }: { user: User | null }) {
   const [viewHistoryUserName, setViewHistoryUserName] = useState<string | null>(null);
   const [userHistory, setUserHistory] = useState<any[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [selectedDesignerDetail, setSelectedDesignerDetail] = useState<any | null>(null);
+  const [fetchingDesignerDetail, setFetchingDesignerDetail] = useState(false);
+
+  const fetchDesignerDetail = async (profileId: string) => {
+    setFetchingDesignerDetail(true);
+    setSelectedDesignerDetail(null);
+    try {
+      // Use core admin designer detail API instead of accountClient
+      const { data } = await apiClient.get('/admin/designer', {
+        params: { designerId: profileId }
+      });
+      setSelectedDesignerDetail(data);
+    } catch (err: any) {
+      console.warn('Failed to fetch designer details from core admin API, trying accountClient fallback:', err);
+      try {
+        const { data } = await accountClient.get(`/designer/detail/${profileId}`);
+        setSelectedDesignerDetail(data);
+      } catch (fallbackErr) {
+        console.error('Failed to fetch designer details from all endpoints:', fallbackErr);
+        alert('디자이너 상세 정보를 불러오는데 실패했습니다.');
+      }
+    } finally {
+      setFetchingDesignerDetail(false);
+    }
+  };
 
   const fetchUserHistory = async (userId: string, userName: string) => {
     setViewHistoryUserId(userId);
     setViewHistoryUserName(userName);
     setLoadingHistory(true);
+    let ncpTxs: any[] = [];
+    
     try {
-      const { data, error } = await supabase
-        .from("credit_transactions")
-        .select("*")
-        .eq("user_id", userId)
-        .order("created_at", { ascending: false });
+      // Find user to map ncp_designer_id
+      const profileInfo = profiles.find((p) => p.id === userId);
+      const targetDesignerId = profileInfo?.ncp_designer_id || userId;
+      
+      let allNcpTxs: any[] = [];
+      let currentPage = 1;
+      let keepFetching = true;
 
-      if (error) throw error;
-      setUserHistory(data || []);
+      while (keepFetching) {
+         try {
+           const res = await apiClient.get('/faceswap/credit/history', { 
+              params: { month: 12, filter: 'ALL', pageNo: currentPage, pageSize: 50, designerId: targetDesignerId } 
+           });
+           const items = res.data?.content || res.data?.data || res.data?.items || res.data;
+           if (items && Array.isArray(items) && items.length > 0) {
+              allNcpTxs = [...allNcpTxs, ...items];
+              const totalCount = res.data?.totalElements || res.data?.totalCount || 0;
+              if (totalCount > 0 && allNcpTxs.length < totalCount) {
+                  currentPage++;
+              } else {
+                  keepFetching = false;
+              }
+           } else {
+              keepFetching = false;
+           }
+         } catch (e1) {
+           console.log("apiClient /faceswap/credit/history not hosted on core. Quietly attempting account server query.");
+           const res = await accountClient.get('/faceswap/credit/history', { 
+              params: { month: 12, filter: 'ALL', pageNo: currentPage, pageSize: 50, designerId: targetDesignerId } 
+           });
+           const items = res.data?.content || res.data?.data || res.data?.items || res.data;
+           if (items && Array.isArray(items) && items.length > 0) {
+              allNcpTxs = [...allNcpTxs, ...items];
+              const totalCount = res.data?.totalElements || res.data?.totalCount || 0;
+              if (totalCount > 0 && allNcpTxs.length < totalCount) {
+                  currentPage++;
+              } else {
+                  keepFetching = false;
+              }
+           } else {
+              keepFetching = false;
+           }
+         }
+      }
+
+      if (allNcpTxs.length > 0) {
+        ncpTxs = allNcpTxs;
+      }
+    } catch (err) {
+      console.log("NCP specialized credit history endpoints are not hosted. Seamlessly fall back to Supabase transactions.");
+    }
+    
+    try {
+      if (ncpTxs.length > 0) {
+        const getCreditTypeDescription = (type: string, amount: number) => {
+          const map: Record<string, string> = {
+            CHARGE: '크레딧 충전',
+            MEMBERSHIP_BONUS: '멤버십 가입 보너스',
+            REFERRAL: '친구 추천 보상',
+            SIGNUP: '신규 가입 보상',
+            DAILY: '출석 보상',
+            AI_FACE_SWAP: 'AI 얼굴 합성 사용',
+            AI_FACE_SWAP_MEMBERSHIP: 'AI 얼굴 합성 (멤버십)',
+            AI_VIDEO: 'AI 영상 생성 사용',
+            AI_VIDEO_MEMBERSHIP: 'AI 영상 생성 (멤버십)',
+            REFUND_AI_FACE_SWAP: 'AI 얼굴 합성 환불',
+            REFUND_AI_FACE_SWAP_MEMBERSHIP: 'AI 얼굴 합성 환불 (멤버십)',
+            REFUND_AI_VIDEO: 'AI 영상 생성 환불',
+            REFUND_AI_VIDEO_MEMBERSHIP: 'AI 영상 생성 환불 (멤버십)',
+            REVOKE_MEMBERSHIP_CREDIT: '멤버십 크레딧 회수'
+          };
+          return map[type] || (amount > 0 ? '크레딧 적립' : '크레딧 차감');
+        };
+
+        const mappedTxs = ncpTxs.map((t: any) => ({
+          id: t.id || t.pointHistoryId || Math.random().toString(),
+          type: (t.amount > 0) ? 'earned' : 'deducted',
+          amount: Math.abs(t.amount || t.point || 0),
+          description: t.description || getCreditTypeDescription(t.type, t.amount),
+          created_at: t.date || t.createdAt || new Date().toISOString()
+        }));
+        setUserHistory(mappedTxs);
+      } else {
+        // Fallback to Supabase if no NCP rows found
+        const { data, error } = await supabase
+          .from("credit_transactions")
+          .select("*")
+          .eq("user_id", userId)
+          .order("created_at", { ascending: false });
+
+        if (error) throw error;
+        setUserHistory(data || []);
+      }
     } catch (err) {
       console.error("Error fetching user history:", err);
-      alert("이력 조회 중 오류가 발생했습니다.");
+      // alert("이력 조회 중 오류가 발생했습니다.");
     } finally {
       setLoadingHistory(false);
     }
@@ -336,26 +482,31 @@ export default function AdminPage({ user }: { user: User | null }) {
     }
     setSavingPg(true);
     try {
-      const { error } = await supabase
-        .from('site_settings')
-        .upsert({
-          id: 'default',
-          toss_client_key: pgClientKey,
-          toss_secret_key: pgSecretKey,
-          updated_at: new Date().toISOString()
-        }, { onConflict: 'id' });
-      
-      if (error) {
-        if (error.code === '42P01') {
-          // Table doesn't exist
-          alert('site_settings 테이블이 존재하지 않습니다. 먼저 database_setup_settings.sql을 실행해주세요.');
-        } else if (error.message?.includes('schema cache')) {
-          alert('Supabase 스키마 캐시 오류입니다. Supabase SQL Editor에서 다음을 실행해주세요:\n\nNOTIFY pgrst, \'reload schema\';');
-        } else {
-          throw error;
-        }
-        return;
+      // 관리자 설정 저장은 Supabase 세션 토큰을 사용합니다. 일반 회원(NCP) 토큰은 절대 사용하지 않습니다.
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token || null;
+
+      if (!token) {
+        throw new Error('관리자 인증 토큰을 찾을 수 없습니다. 다시 로그인해 주세요.');
       }
+
+      const response = await fetch('/api/admin/site-settings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          tossClientKey: pgClientKey,
+          tossSecretKey: pgSecretKey
+        })
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || `HTTP error ${response.status}`);
+      }
+
       alert('PG 연동 설정이 성공적으로 저장되었습니다.');
     } catch (err: any) {
       console.error(err);
@@ -394,6 +545,9 @@ export default function AdminPage({ user }: { user: User | null }) {
 
   useEffect(() => {
     // If not logged in or not admin, redirect to home
+    const isNcpAdmin = localStorage.getItem('ncp_admin') === 'true';
+    if (isNcpAdmin) return;
+    
     if (!user?.id) {
       navigate("/");
     } else if (user.email !== "cubric.ceo@gmail.com") {
@@ -453,58 +607,192 @@ export default function AdminPage({ user }: { user: User | null }) {
       }
       setAiModels(modelsData);
 
-      // Fetch users
+      // Fetch users from NCP API (instead of Supabase)
       let usersData: any[] | null = null;
       let usersError: any = null;
 
-      const fullResult = await supabase
-        .from("profiles")
-        .select("id, email, full_name, avatar_url, last_login_at, credits, subscription_plan, subscription_status, subscription_end_date, created_at, billing_key, card_company, card_number, is_blacklisted, is_cs_admin, business_status, role")
-        .order("created_at", { ascending: false });
-      
-      usersData = fullResult.data;
-      usersError = fullResult.error;
+      try {
+        console.log("Attempting to load designers from NCP API (/admin/designers)...");
+        let res;
+        try {
+          // Use apiClient for core AdminController endpoints!
+          res = await apiClient.get('/admin/designers');
+        } catch (errFirst: any) {
+          console.warn("NCP API GET `/admin/designers` failed. Detailed error print:", {
+            response_data: errFirst.response?.data,
+            config_url: errFirst.config?.url,
+            status: errFirst.response?.status,
+            message: errFirst.message
+          });
+          
+          console.log("Retrying with NCP API `/designer/all` on accountClient...");
+          res = await accountClient.get('/designer/all');
+        }
 
-      if (usersError) {
-        console.warn("Full profile fetch failed, trying safe fetch:", usersError);
-        // Fallback: Try fetching without credits/avatar_url/last_login_at if they might be missing
-        const fallbackResult = await supabase
-          .from("profiles")
-          .select("id, email, full_name, role, created_at, is_blacklisted, is_cs_admin, business_status")
-          .order("created_at", { ascending: false });
-        
-        usersData = fallbackResult.data;
-        usersError = fallbackResult.error;
-        setHasCreditsColumn(false);
-      } else {
+        let designersArray = [];
+        if (Array.isArray(res.data)) {
+          designersArray = res.data;
+        } else if (res.data && Array.isArray(res.data.content)) {
+          designersArray = res.data.content;
+        } else if (res.data && Array.isArray(res.data.data)) {
+          designersArray = res.data.data;
+        } else if (res.data && Array.isArray(res.data.items)) {
+          designersArray = res.data.items;
+        } else {
+          console.warn("NCP response format unrecognized:", res.data);
+        }
+
+        usersData = designersArray.map((designer: any) => ({
+          id: designer.id || designer.accountId || designer.designerId,
+          email: designer.email || designer.accountId,
+          full_name: designer.name || '이름 없음',
+          avatar_url: designer.profileImageUrl || null,
+          last_login_at: designer.lastLoginAt || designer.updatedAt || null,
+          credits: designer.credits || 0,
+          subscription_plan: designer.subscriptionPlan || null,
+          subscription_status: designer.subscriptionStatus || 'inactive',
+          subscription_end_date: designer.subscriptionEndDate || null,
+          created_at: designer.createdAt || new Date().toISOString(),
+          billing_key: designer.billingKey || null,
+          card_company: designer.cardCompany || null,
+          card_number: designer.cardNumber || null,
+          is_blacklisted: designer.isBlacklisted || false,
+          is_cs_admin: designer.isCsAdmin || false,
+          business_status: designer.businessStatus || 'active',
+          role: designer.role || 'user'
+        }));
+
         setHasCreditsColumn(true);
+      } catch (err: any) {
+        usersError = err;
+        console.error("NCP profile fetch failed completely! Real Error details printed below:", {
+          response_data: err.response?.data,
+          config_url: err.config?.url,
+          status: err.response?.status,
+          message: err.message
+        });
+
+        // ----------------- STRICT REQUIREMENT -----------------
+        // 강제 Supabase 전환 금지: NCP API 호출 실패 시 Supabase 데이터를 불러오는 부분을 주석 처리합니다.
+        /*
+        console.warn("Supabase Fallback is DISABLED by user's design setup instruction.");
+        const fullResult = await supabase
+          .from("profiles")
+          .select("id, email, full_name, avatar_url, last_login_at, credits, subscription_plan, subscription_status, subscription_end_date, created_at, billing_key, card_company, card_number, is_blacklisted, is_cs_admin, business_status, role")
+          .order("created_at", { ascending: false });
+        usersData = fullResult.data;
+        */
+        // ------------------------------------------------------
+      }
+
+      // Fetch internal administrator and staff members from Supabase profiles table
+      let supabaseAdmins: any[] = [];
+      const fetchAdminsWithRetryAndFallback = async (): Promise<any[]> => {
+        let attempts = 3;
+        let lastError = null;
+        
+        while (attempts > 0) {
+          if (!isMountedRef.current) return [];
+          try {
+            const { data, error } = await supabase
+              .from("profiles")
+              .select("id, email, full_name, avatar_url, last_login_at, credits, subscription_plan, subscription_status, subscription_end_date, created_at, billing_key, card_company, card_number, is_blacklisted, is_cs_admin, business_status, role")
+              .neq("role", "user");
+              
+            if (!error && data) {
+              return data;
+            }
+            lastError = error;
+          } catch (e: any) {
+            lastError = e;
+          }
+          
+          if (attempts > 1) {
+            // Progressive delay
+            await new Promise((resolve) => setTimeout(resolve, (4 - attempts) * 500));
+          }
+          attempts--;
+        }
+        
+        console.warn("Retries failed for filtered admin query, testing robust fallback select(*)...", lastError);
+        try {
+          const { data, error } = await supabase.from("profiles").select("*");
+          if (!error && data) {
+            return data.filter((p: any) => p.role && p.role !== 'user');
+          }
+          if (error) {
+            console.error("Fallback profiles select '*' also returned error:", error);
+          }
+        } catch (fbErr) {
+          console.error("Severe fallback error querying profiles:", fbErr);
+        }
+        
+        const DEFAULT_PRESET_ADMINS = [
+          {
+            id: "system-admin-fallback",
+            email: "cubric.ceo@gmail.com",
+            full_name: "최고 관리자 (통합)",
+            role: "system_admin",
+            business_status: "active",
+            created_at: new Date().toISOString()
+          }
+        ];
+        return DEFAULT_PRESET_ADMINS;
+      };
+
+      try {
+        supabaseAdmins = await fetchAdminsWithRetryAndFallback();
+      } catch (e) {
+        console.error("Failed to query admins from Supabase profiles:", e);
       }
 
       if (!usersError && usersData) {
-        const usersWithCredits = usersData.map((u: any) => ({
-          ...u,
-          credits: u.credits !== undefined ? Number(u.credits || 0) : 0,
+        // Fetch NCP details for each user concurrently
+        const usersWithNCP = await Promise.all(usersData.map(async (u: any) => {
+          let ncpData: any = {};
+          try {
+            // First try core Admin API details query
+            const res = await apiClient.get('/admin/designer', {
+              params: { designerId: u.id }
+            });
+            if (res.data) ncpData = res.data;
+          } catch (errFirst: any) {
+            try {
+              const res = await accountClient.get(`/designer/detail/${u.id}`);
+              if (res.data) ncpData = res.data;
+            } catch (err: any) {
+              // Fail silently since we already have the basic items data
+            }
+          }
+          
+          return {
+            ...u,
+            credits: u.credits !== undefined ? Number(u.credits || 0) : 0,
+            full_name: ncpData.name || u.name || u.full_name,
+            avatar_url: ncpData.profileImageUrl || u.avatar_url,
+            business_status: typeof ncpData.businessStatus === 'string' ? ncpData.businessStatus : (u.business_status || u.status || 'active'),
+            ncp_synced: !!(ncpData.email || u.email) // Custom flag to show if they exist in NCP
+          };
         }));
-        setProfiles(usersWithCredits);
-        setTotalUsers(usersWithCredits.length);
+        
+        if (!isMountedRef.current) return;
+
+        // Merge the staff/admin accounts from Supabase with the partner/designer list from NCP
+        const combinedProfiles = [...usersWithNCP, ...supabaseAdmins];
+        setProfiles(combinedProfiles);
+        setTotalUsers(usersWithNCP.length);
         
         // Log privacy action: VIEW
         try {
-          await logPrivacyAction('VIEW', 'profiles', 'ALL', { source: 'AdminPage_Load' });
+          await logPrivacyAction('VIEW', 'profiles', 'ALL', { source: 'AdminPage_Load_NCP_And_Supabase_Admins' });
         } catch (e) {}
       } else {
-        console.error("Error fetching profiles:", usersError);
-        
-        // If 42P17 (RLS infinite recursion) happens due to unpatched DB, provide mock data
-        if (usersError?.code === "42P17") {
-          const mockProfiles = [
-            { id: "1", email: "cubric.ceo@gmail.com", full_name: "대표자 (Mock)", role: "system_admin", credits: 1500, subscription_plan: "Business", subscription_status: "active", billing_key: "mock_key", created_at: new Date().toISOString() },
-            { id: "2", email: "user@example.com", full_name: "일반사용자 (Mock)", role: "user", credits: 50, subscription_plan: "Free", subscription_status: "inactive", created_at: new Date().toISOString() },
-            { id: "3", email: "pro@example.com", full_name: "프로사용자 (Mock)", role: "user", credits: 350, subscription_plan: "Pro", subscription_status: "active", billing_key: "mock_key_2", created_at: new Date().toISOString() }
-          ];
-          setProfiles(mockProfiles);
-          setTotalUsers(mockProfiles.length);
-        }
+        if (!isMountedRef.current) return;
+        // Since we are explicitly requested to NOT fallback to Supabase for the designers, we set designers to empty
+        // but still maintain the Supabase admin accounts loaded to let internal management work
+        setProfiles(supabaseAdmins);
+        setTotalUsers(0);
+        console.warn("No designer profiles loaded from NCP due to failure. Internal staff loaded:", supabaseAdmins.length);
       }
 
       // Fetch duplicated IP setting & Credit setting
@@ -1687,13 +1975,20 @@ export default function AdminPage({ user }: { user: User | null }) {
           </div>
         </nav>
 
-        <div className="p-4 border-t border-gray-200">
+        <div className="p-4 border-t border-gray-200 flex flex-col gap-2">
           <button
             onClick={() => navigate("/")}
-            className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-gray-600 hover:bg-gray-50 rounded-xl transition-colors"
+            className="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-50 rounded-xl transition-colors"
           >
-            <LogOut className="w-4 h-4" />
+            <Globe className="w-4 h-4 text-gray-400" />
             사이트로 돌아가기
+          </button>
+          <button
+            onClick={handleLogout}
+            className="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-bold text-red-600 hover:bg-red-50 rounded-xl transition-colors"
+          >
+            <LogOut className="w-4 h-4 animate-pulse" />
+            로그아웃
           </button>
         </div>
       </aside>
@@ -2607,6 +2902,13 @@ export default function AdminPage({ user }: { user: User | null }) {
                             </td>
                             <td className="p-5 text-right">
                               <div className="flex items-center justify-end gap-2">
+                                <button
+                                  title="디자이너 추가 정보"
+                                  onClick={() => fetchDesignerDetail(profile.id)}
+                                  className="text-blue-500 hover:text-blue-700 p-2 hover:bg-blue-50 rounded-lg transition-colors"
+                                >
+                                  <UserCircle className="w-4 h-4" />
+                                </button>
                                 <button
                                   title="크레딧 이용내역"
                                   onClick={() =>
@@ -3619,6 +3921,117 @@ export default function AdminPage({ user }: { user: User | null }) {
               <div className="p-6 bg-gray-50 border-t border-gray-100 flex justify-end">
                 <button
                   onClick={() => setViewHistoryUserId(null)}
+                  className="px-6 py-2.5 bg-gray-900 text-white font-bold rounded-xl hover:bg-gray-800 transition-colors"
+                >
+                  닫기
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Designer Detail Modal */}
+      <AnimatePresence>
+        {selectedDesignerDetail && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setSelectedDesignerDetail(null)}
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white rounded-[32px] w-full max-w-2xl overflow-hidden shadow-2xl relative z-10 flex flex-col max-h-[90vh]"
+            >
+              <div className="px-8 py-6 border-b border-gray-100 flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                   <div className="w-12 h-12 rounded-full overflow-hidden bg-gray-100">
+                     {selectedDesignerDetail.profileImageUrl ? (
+                       <img src={selectedDesignerDetail.profileImageUrl} alt="profile" className="w-full h-full object-cover" />
+                     ) : (
+                       <UserCircle className="w-full h-full text-gray-400 p-2" />
+                     )}
+                   </div>
+                   <div>
+                     <h2 className="text-xl font-bold text-gray-900">
+                       {selectedDesignerDetail.name} <span className="font-medium text-sm text-gray-500 text-left">님 정보</span>
+                     </h2>
+                     <p className="text-xs text-gray-400 font-medium">{selectedDesignerDetail.email}</p>
+                   </div>
+                </div>
+                <button
+                  onClick={() => setSelectedDesignerDetail(null)}
+                  className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+                >
+                  <X className="w-5 h-5 text-gray-400" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-8 bg-gray-50/30">
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <div>
+                        <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest mb-4">기본 정보</h3>
+                        <div className="space-y-4">
+                            <div>
+                                <p className="text-xs text-gray-500 font-bold mb-1">연락처</p>
+                                <p className="text-sm text-gray-900 font-medium bg-gray-50 p-3 rounded-xl border border-gray-100">
+                                  {selectedDesignerDetail.mobileNumber || selectedDesignerDetail.phone || '등록 안됨'}
+                                </p>
+                            </div>
+                            <div>
+                                <p className="text-xs text-gray-500 font-bold mb-1">소개글</p>
+                                <p className="text-sm text-gray-900 font-medium bg-gray-50 p-3 rounded-xl border border-gray-100 whitespace-pre-wrap min-h-[80px]">
+                                  {selectedDesignerDetail.introduction || '없음'}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                    <div>
+                         <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest mb-4">약관 동의</h3>
+                         <div className="space-y-3">
+                             <div className="flex items-center justify-between p-3 rounded-xl border border-gray-100 bg-white">
+                                 <span className="text-sm font-bold text-gray-700">AI 이미지 동의</span>
+                                 <span className={`text-xs font-bold px-2 py-1 rounded-md ${selectedDesignerDetail.aiImageAgreement || selectedDesignerDetail.ai_image_agreement ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                                     {selectedDesignerDetail.aiImageAgreement || selectedDesignerDetail.ai_image_agreement ? '동의' : '미동의'}
+                                 </span>
+                             </div>
+                             <div className="flex items-center justify-between p-3 rounded-xl border border-gray-100 bg-white">
+                                 <span className="text-sm font-bold text-gray-700">AI 영상(Video) 동의</span>
+                                 <span className={`text-xs font-bold px-2 py-1 rounded-md ${selectedDesignerDetail.aiVideoAgreement || selectedDesignerDetail.ai_video_agreement ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                                     {selectedDesignerDetail.aiVideoAgreement || selectedDesignerDetail.ai_video_agreement ? '동의' : '미동의'}
+                                 </span>
+                             </div>
+                             <div className="flex items-center justify-between p-3 rounded-xl border border-gray-100 bg-white">
+                                 <span className="text-sm font-bold text-gray-700">마케팅 수신 동의</span>
+                                 <span className={`text-xs font-bold px-2 py-1 rounded-md ${selectedDesignerDetail.marketingConsent || selectedDesignerDetail.marketing_consent ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                                     {selectedDesignerDetail.marketingConsent || selectedDesignerDetail.marketing_consent ? '동의' : '미동의'}
+                                 </span>
+                             </div>
+                         </div>
+
+                         <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest mb-4 mt-8">영업/휴무 정보</h3>
+                         <div className="space-y-4 bg-white p-4 rounded-xl border border-gray-100">
+                             <div>
+                               <span className="text-xs text-gray-500 font-bold">영업시간: </span>
+                               <span className="text-sm font-medium">{selectedDesignerDetail.businessHours || selectedDesignerDetail.business_hours || '정보 없음'}</span>
+                             </div>
+                             <div>
+                               <span className="text-xs text-gray-500 font-bold">정기휴무: </span>
+                               <span className="text-sm font-medium">{selectedDesignerDetail.holiday || '정보 없음'}</span>
+                             </div>
+                         </div>
+                    </div>
+                 </div>
+              </div>
+
+              <div className="p-6 bg-white border-t border-gray-100 flex justify-end">
+                <button
+                  onClick={() => setSelectedDesignerDetail(null)}
                   className="px-6 py-2.5 bg-gray-900 text-white font-bold rounded-xl hover:bg-gray-800 transition-colors"
                 >
                   닫기

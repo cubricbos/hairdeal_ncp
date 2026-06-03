@@ -36,7 +36,7 @@ ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Profiles_Select_All" 
 ON public.profiles FOR SELECT USING (true);
 
--- 사용자는 '본인'의 프로필(크레딧 포함) 정보를 수정할 수 있음 (출석 보상 및 사용 차감 기능)
+-- 사용자는 '본인'의 프로필(크레딧 포함) 정보를 수정할 수 있음 (출석 보상 및 사용 차감 기능. Supabase 로그인 대응)
 CREATE POLICY "Profiles_Update_Own" 
 ON public.profiles FOR UPDATE USING (auth.uid() = id);
 
@@ -48,17 +48,29 @@ ON public.profiles FOR UPDATE USING (auth.jwt() ->> 'email' = 'cubric.ceo@gmail.
 -- [4] Credit Transactions (크레딧 거래 내역) 테이블 새 RLS 정책 적용
 ALTER TABLE public.credit_transactions ENABLE ROW LEVEL SECURITY;
 
--- 사용자는 '본인'의 크레딧 내역만 조회 가능
+-- 사용자는 '본인'의 크레딧 내역만 조회 가능 (Supabase 로그인 대응)
 CREATE POLICY "Tx_Select_Own" 
 ON public.credit_transactions FOR SELECT USING (auth.uid() = user_id);
 
--- 사용자는 '본인'의 크레딧 획득/소비 내역을 추가 가능 (출석 보상, AI 생성 스크립트에서 작동)
+-- 사용자는 '본인'의 크레딧 획득/소비 내역을 추가 가능 (출석 보상, AI 생성 스크립트 등에서 작동)
 CREATE POLICY "Tx_Insert_Own" 
 ON public.credit_transactions FOR INSERT WITH CHECK (auth.uid() = user_id);
 
 -- 관리자(운영자)는 시스템 상의 모든 내역을 조회/삽입/수정 가능
 CREATE POLICY "Tx_All_Admin" 
 ON public.credit_transactions FOR ALL USING (auth.jwt() ->> 'email' = 'cubric.ceo@gmail.com');
+
+-- [5] 원자적 크레딧 증가를 위한 RPC 함수 추가 (경쟁 조건 방지 및 RLS 우회)
+CREATE OR REPLACE FUNCTION public.increment_credits(user_id UUID, amount INT)
+RETURNS void AS $$
+  UPDATE public.profiles 
+  SET credits = COALESCE(credits, 0) + amount 
+  WHERE id = user_id;
+$$ LANGUAGE sql SECURITY DEFINER;
+
+-- 일반 익명/로그인 사용자가 직접 이 API를 조작하여 악용하지 못하도록 실행 권한 박탈 (service_role만 실행 안전하게 허용)
+REVOKE EXECUTE ON FUNCTION public.increment_credits(UUID, INT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.increment_credits(UUID, INT) TO service_role;
 
 -- (선택) 이전 DB 오류로 인해 트랜잭션 기록과 현재 크레딧 금액을 맞추고 싶으시다면
 -- 필요에 따라 크레딧 관련 테이블 데이터를 초기화 하실 수 있습니다.

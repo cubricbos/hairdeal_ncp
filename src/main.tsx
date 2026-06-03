@@ -3,6 +3,19 @@ import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 
+// Aggressive logout cleanup if requested via URL
+const params = new URLSearchParams(window.location.search);
+if (params.get('logout')) {
+  localStorage.clear();
+  sessionStorage.clear();
+  document.cookie.split(";").forEach((c) => {
+    document.cookie = c
+      .replace(/^ +/, "")
+      .replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
+  });
+  console.log("Aggressive logout cleanup performed from main.tsx.");
+}
+
 // Suppress known Vite HMR Websocket errors in the sandbox environment
 const originalConsoleError = console.error;
 const originalConsoleWarn = console.warn;

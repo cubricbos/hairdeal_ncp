@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { supabase } from "../../supabase";
 import { useSiteContext } from "../../context/SiteContext";
-import { SiteSettings, RefinementHistoryItem } from "../../lib/siteSettings";
+import { SiteSettings, RefinementHistoryItem, defaultSiteSettings } from "../../lib/siteSettings";
 import {
   Save,
   AlertCircle,
@@ -2208,6 +2208,12 @@ ${currentHtml}`;
               onClick={() => setActiveTab("promo")}
               icon={<Megaphone className="w-4 h-4" />}
               label="AI 마케팅 자동화"
+            />
+            <TabButton
+              active={activeTab === "credit_settings"}
+              onClick={() => setActiveTab("credit_settings")}
+              icon={<CreditCard className="w-4 h-4" />}
+              label="크레딧 설정"
             />
             <TabButton
               active={activeTab === "footer"}
@@ -4676,6 +4682,42 @@ ${currentHtml}`;
               </div>
             )}
 
+            {activeTab === "credit_settings" && (
+              <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                <div>
+                  <div className="flex items-center justify-between mb-4 border-b pb-2">
+                    <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                      <CreditCard className="w-5 h-5 text-brand-primary" /> 크레딧 충전 설정
+                    </h3>
+                  </div>
+                  <div className="space-y-4 bg-gray-50 p-6 rounded-xl border border-gray-100">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="font-bold text-gray-900 mb-1">크레딧 충전 영역 표시</h4>
+                        <p className="text-sm text-gray-500">마이페이지의 [크레딧 관리]에서 충전 옵션 영역을 표시하거나 숨깁니다.</p>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input 
+                          type="checkbox" 
+                          className="sr-only peer"
+                          checked={draft.creditSettings?.chargeOptionsEnabled || false}
+                          onChange={(e) => {
+                            setDraft(prev => ({
+                              ...prev,
+                              creditSettings: {
+                                ...prev.creditSettings,
+                                chargeOptionsEnabled: e.target.checked
+                              }
+                            }));
+                          }}
+                        />
+                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-primary"></div>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
             {activeTab === "footer" && (
               <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
                 <div>

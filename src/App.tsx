@@ -10,11 +10,12 @@ import InquiryModal from './components/InquiryModal';
 import LayerSection from './components/LayerSection';
 import PartnersSection from './components/PartnersSection';
 import { motion } from 'motion/react';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useSiteContext } from './context/SiteContext';
 import AiHairModelPage from './pages/AiHairModelPage';
 import AiHairModelAppPage from './pages/AiHairModelAppPage';
 import AdminPage from './pages/AdminPage'; // Import AdminPage
+import AdminLoginPage from './pages/admin/AdminLoginPage';
 import SiteEditorPage from './pages/admin/SiteEditorPage'; // Import SiteEditorPage
 import ShopManagementPage from './pages/admin/ShopManagementPage'; // O2O Manager
 import CsAdminPage from './pages/CsAdminPage'; // Import CsAdminPage
@@ -33,12 +34,15 @@ import MarketingPage from './pages/mypage/Marketing';
 import CreditsPage from './pages/mypage/Credits';
 import PortfolioPage from './pages/mypage/Portfolio';
 import ReferralPage from './pages/mypage/ReferralPage';
+import AuthCallbackPage from './pages/AuthCallbackPage';
 import ChatWidget from './components/ChatWidget';
 import MobileShopView from './pages/MobileShopView'; // O2O Customer View
 import ShopNotifier from './components/admin/ShopNotifier'; // O2O Notifier
 import ParkingPage from './components/ParkingPage';
 import { supabase } from './supabase';
 import { User } from '@supabase/supabase-js';
+import { accountClient } from './lib/ncpClient';
+import { retrySupabaseSelect } from './lib/supabase-utils';
 
 function LandingPage({ setIsAuthOpen, user }: { setIsAuthOpen: (val: boolean) => void, user: User | null }) {
   const { settings, isLoading } = useSiteContext();
@@ -56,26 +60,26 @@ function LandingPage({ setIsAuthOpen, user }: { setIsAuthOpen: (val: boolean) =>
   return (
     <main>
       <Hero />
-      {order.map((sectionId) => {
+      {order.map((sectionId, index) => {
          if (sectionId === 'features') {
             if (settings?.features?.hidden) return null;
-            return <Features key="features" />;
+            return <Features key={`features-${index}`} />;
          }
          if (sectionId === 'aiDemo') {
             if (settings?.aiDemo?.hidden) return null;
-            return <AiMarketingDemo key="aiDemo" user={user} />;
+            return <AiMarketingDemo key={`aiDemo-${index}`} user={user} />;
          }
          if (sectionId === 'pricing') {
             if (settings?.pricing?.hidden) return null;
-            return <Pricing key="pricing" />;
+            return <Pricing key={`pricing-${index}`} />;
          }
          if (sectionId === 'partners') {
             if (settings?.partnerSettings?.hidden) return null;
-            return <PartnersSection key="partners" />;
+            return <PartnersSection key={`partners-${index}`} />;
          }
          if (sectionId.startsWith('layer_')) {
             const layer = settings?.layers?.find(l => l.id === sectionId);
-            if (layer && !layer.hidden) return <LayerSection key={layer.id} layer={layer} />;
+            if (layer && !layer.hidden) return <LayerSection key={`${layer.id}-${index}`} layer={layer} />;
          }
          return null;
       })}
@@ -91,6 +95,12 @@ function AppContent() {
   const navigate = useNavigate();
   const location = useLocation();
   const { settings } = useSiteContext();
+  const isMounted = useRef(true);
+
+  useEffect(() => {
+    isMounted.current = true;
+    return () => { isMounted.current = false; };
+  }, []);
 
   useEffect(() => {
     // 페이지 이동(라우팅) 시 새로운 컴포넌트가 렌더링되면서 일부 번역이 누락되는 현상을 방지
@@ -194,6 +204,44 @@ function AppContent() {
   const checkingWelcomeReward = useRef<string | null>(null);
   const lastProcessedKey = useRef<string | null>(null);
 
+  const getLocalTxs = (userId: string): any[] => {
+    try {
+      const key = `local_txs_${userId}`;
+      const current = localStorage.getItem(key);
+      return current ? JSON.parse(current) : [];
+    } catch (e) {
+      return [];
+    }
+  };
+
+  const saveLocalTx = (userId: string, tx: any) => {
+    try {
+      const key = `local_txs_${userId}`;
+      const list = getLocalTxs(userId);
+      const isDup = list.some((item: any) => item.description === tx.description && item.type === tx.type);
+      if (!isDup) {
+        list.unshift({
+          id: tx.id || 'local_' + Math.random().toString(36).substring(2, 11),
+          type: tx.type,
+          amount: tx.amount,
+          description: tx.description,
+          created_at: tx.created_at || new Date().toISOString()
+        });
+        localStorage.setItem(key, JSON.stringify(list));
+        console.log(`[Offline Fallback] Logged transactional token locally successfully: "${tx.description}" (${tx.amount} credits)`);
+      }
+    } catch (e) {
+      console.warn("Failed to write offline fallback transaction:", e);
+    }
+  };
+
+  const getAuthToken = async (): Promise<string | null> => {
+    const ncpToken = localStorage.getItem('ncp_access_token');
+    if (ncpToken) return ncpToken;
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token || null;
+  };
+
   const checkWelcomeReward = async (currentUser: User) => {
     const lockKey = `${currentUser.id}_welcome`;
     
@@ -201,51 +249,39 @@ function AppContent() {
     checkingWelcomeReward.current = lockKey;
 
     try {
-      const { data: metrics } = await supabase.from('app_metrics').select('welcome_credit_reward').eq('id', 1).single();
-      const rewardAmount = metrics?.welcome_credit_reward;
-      if (!rewardAmount) {
-        checkingWelcomeReward.current = null;
-        return;
-      }
-
-      const { data: existingTxs } = await supabase
-        .from('credit_transactions')
-        .select('id')
-        .eq('user_id', currentUser.id)
-        .eq('type', 'earned')
-        .eq('description', '신규 가입 환영 보상')
-        .maybeSingle();
-
-      if (existingTxs) {
+      // Check offline local log first
+      const hasLocalWelcome = getLocalTxs(currentUser.id).some((t: any) => t.description === '신규 가입 환영 보상');
+      if (hasLocalWelcome) {
         lastProcessedKey.current = (lastProcessedKey.current || '') + '|welcome';
         checkingWelcomeReward.current = null;
         return;
       }
 
-      const { error: insertError } = await supabase.from('credit_transactions').insert([{
-        user_id: currentUser.id,
-        type: 'earned',
-        amount: rewardAmount,
-        description: '신규 가입 환영 보상'
-      }]);
-
-      if (insertError) throw insertError;
-
-      const { data: profile } = await supabase.from('profiles').select('credits').eq('id', currentUser.id).maybeSingle();
-      const currentCredits = profile?.credits || 0;
-      
-      const { error: updateError } = await supabase.from('profiles').update({
-        credits: currentCredits + rewardAmount
-      }).eq('id', currentUser.id);
-
-      if (updateError) console.error("Welcome Reward profile update failed:", updateError);
-
-      lastProcessedKey.current = (lastProcessedKey.current || '') + '|welcome';
-      window.dispatchEvent(new Event('credits_updated'));
-    } catch (err: any) {
-      if (err?.message !== 'Failed to fetch' && err?.message !== 'FetchError') {
-        console.error("Welcome reward check failed", err);
+      const token = await getAuthToken();
+      if (!token || !isMounted.current) {
+        checkingWelcomeReward.current = null;
+        return;
       }
+
+      const response = await fetch('/api/credits/welcome-reward', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`Welcome reward API returned: ${response.status}`);
+      }
+
+      const result = await response.json();
+      if (result.ok && isMounted.current) {
+        lastProcessedKey.current = (lastProcessedKey.current || '') + '|welcome';
+        window.dispatchEvent(new Event('credits_updated'));
+      }
+    } catch (err: any) {
+      console.warn("Welcome reward check skipped or failed, fallback to local:", err.message || err);
     } finally {
       checkingWelcomeReward.current = null;
     }
@@ -267,166 +303,240 @@ function AppContent() {
     checkingReward.current = lockKey;
 
     try {
-      const { data: metrics } = await supabase.from('app_metrics').select('daily_credit_reward').eq('id', 1).single();
-      const rewardAmount = metrics?.daily_credit_reward;
-      if (!rewardAmount) {
-        checkingReward.current = null;
-        return;
-      }
-
       const rewardDescription = "일일 로그인 출석 보상";
-      const dateParts = today.split("-").map(Number);
-      const kstStart = new Date(Date.UTC(dateParts[0], dateParts[1] - 1, dateParts[2]));
-      kstStart.setUTCHours(kstStart.getUTCHours() - 9); 
-      const kstEnd = new Date(kstStart.getTime() + 24 * 60 * 60 * 1000 - 1);
-      
-      const { data: existingTxs } = await supabase
-        .from("credit_transactions")
-        .select("id")
-        .eq("user_id", currentUser.id)
-        .eq("type", "earned")
-        .eq("description", rewardDescription)
-        .gte("created_at", kstStart.toISOString())
-        .lte("created_at", kstEnd.toISOString());
 
-      if (existingTxs && existingTxs.length > 0) {
+      // Check offline local log first
+      const localTxs = getLocalTxs(currentUser.id);
+      const todayLocalExists = localTxs.some((t: any) => 
+        t.description === rewardDescription && 
+        new Date(t.created_at).toDateString() === new Date().toDateString()
+      );
+      if (todayLocalExists) {
         lastProcessedKey.current = (lastProcessedKey.current || '') + `|${today}`;
         checkingReward.current = null;
         return;
       }
 
-      const { error: insertError } = await supabase.from('credit_transactions').insert([{
-        user_id: currentUser.id,
-        type: 'earned',
-        amount: rewardAmount,
-        description: rewardDescription
-      }]);
-
-      if (insertError) throw insertError;
-
-      const { data: profile } = await supabase.from('profiles').select('credits').eq('id', currentUser.id).maybeSingle();
-      const currentCredits = profile?.credits || 0;
-      
-      const { error: updateError } = await supabase.from('profiles').update({
-        credits: currentCredits + rewardAmount
-      }).eq('id', currentUser.id);
-
-      if (updateError) console.error("Daily Reward profile update failed:", updateError);
-
-      lastProcessedKey.current = (lastProcessedKey.current || '') + `|${today}`;
-      window.dispatchEvent(new Event('credits_updated'));
-    } catch (err: any) {
-      if (err?.message !== 'Failed to fetch' && err?.message !== 'FetchError') {
-        console.error("Daily reward check failed", err);
+      const token = await getAuthToken();
+      if (!token || !isMounted.current) {
+        checkingReward.current = null;
+        return;
       }
+
+      const response = await fetch('/api/credits/daily-reward', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`Daily reward API returned: ${response.status}`);
+      }
+
+      const result = await response.json();
+      if (result.ok && isMounted.current) {
+        lastProcessedKey.current = (lastProcessedKey.current || '') + `|${today}`;
+        window.dispatchEvent(new Event('credits_updated'));
+      }
+    } catch (err: any) {
+      console.warn("Daily reward check skipped or failed, fallback to local:", err.message || err);
     } finally {
       checkingReward.current = null;
     }
   };
 
   const ensureProfileExists = async (currentUser: User) => {
+    const lockKey = `${currentUser.id}_ensure_profile`;
+    if (lastProcessedKey.current && lastProcessedKey.current.includes('ensured')) return;
+    
     try {
-      const { data, error: fetchError } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('id', currentUser.id)
-        .maybeSingle();
-      
-      if (fetchError && fetchError.message !== 'Failed to fetch' && fetchError.message !== 'FetchError') {
-        console.error("Profile check fetch failed:", fetchError);
+      const token = await getAuthToken();
+      if (!token || !isMounted.current) return;
+
+      const response = await fetch('/api/credits/ensure-profile', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          name: currentUser.user_metadata?.full_name || null,
+          email: currentUser.email || null,
+          referralCode: localStorage.getItem('referral_code') || null
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Ensure profile API returned: ${response.status}`);
       }
 
-      if (!data) {
-        console.log("Creating new profile for:", currentUser.email);
-        
-        // Check if there is a referral code in local storage
-        let referredBy = null;
-        const storedReferralCode = localStorage.getItem('referral_code');
-        if (storedReferralCode) {
-           const { data: refData } = await supabase.from('profiles').select('id').eq('referral_code', storedReferralCode).single();
-           if (refData) referredBy = refData.id;
-        }
-
-        // Generate a random referral code using user ID
-        const generatedCode = btoa(currentUser.id.replace(/-/g, '')).substring(0, 8).toUpperCase();
-
-        const { error: insertError } = await supabase.from('profiles').upsert({
-          id: currentUser.id,
-          email: currentUser.email,
-          full_name: currentUser.user_metadata?.full_name || '사용자',
-          credits: 0,
-          referral_code: generatedCode,
-          referred_by: referredBy
-        }, { onConflict: 'id', ignoreDuplicates: true });
-        
-        if (insertError) {
-           console.error("Profile creation failed:", insertError);
-        } else {
-           console.log("Profile created successfully");
-           if (referredBy) {
-               // Create mission
-               await supabase.from('referral_missions').insert([{
-                 referrer_id: referredBy,
-                 referred_id: currentUser.id,
-                 status: 'signup'
-               }]);
-               // Give the referrer their signup credits
-               let rewardAmount = 20;
-               try {
-                 const { data: metrics } = await supabase.from('app_metrics').select('referral_signup_reward').eq('id', 1).single();
-                 if (metrics?.referral_signup_reward) rewardAmount = metrics.referral_signup_reward;
-               } catch (e: any) {
-                 if (e?.message !== 'Failed to fetch' && e?.message !== 'FetchError') {
-                   console.error("Failed to fetch referral reward metrics", e);
-                 }
-               }
-
-               const { data: refUser } = await supabase.from('profiles').select('credits').eq('id', referredBy).single();
-               if (refUser) {
-                 await supabase.from('profiles').update({ credits: refUser.credits + rewardAmount }).eq('id', referredBy);
-                 await supabase.from('credit_transactions').insert([{
-                   user_id: referredBy,
-                   type: 'earned',
-                   amount: rewardAmount,
-                   description: '친구 추천 가입 보상'
-                 }]);
-               }
-           }
-        }
+      const result = await response.json();
+      if (result.ok && isMounted.current) {
+        console.log("Profile ensured successfully on secure backend:", result);
+        lastProcessedKey.current = (lastProcessedKey.current || '') + '|ensured';
       }
     } catch (err: any) {
-      if (err?.message !== 'Failed to fetch' && err?.message !== 'FetchError') {
-        console.error("Profile ensure failed:", err);
-      }
+      console.warn("[ensureProfileExists] Error securing profile existence:", err.message);
     }
   };
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      setIsAuthInitialized(true);
-    });
+    let supabaseSub: any = null;
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+    const checkNcpSession = async () => {
+      const ncpToken = localStorage.getItem('ncp_access_token');
+      if (ncpToken) {
+        try {
+          // Decode JWT payload instead of hitting broken /designer/detail mapping
+          const payloadPart = ncpToken.split('.')[1];
+          const decodedStr = decodeURIComponent(escape(atob(payloadPart)));
+          const decoded = JSON.parse(decodedStr);
+          
+          if (decoded && decoded.id) {
+            const rawId = decoded.id;
+            const fullUuid = rawId.includes('-')
+              ? rawId
+              : `${rawId.substring(0, 8)}-${rawId.substring(8, 12)}-${rawId.substring(12, 16)}-${rawId.substring(16, 20)}-${rawId.substring(20)}`;
+            
+            let finalId = fullUuid;
+            if (decoded.email && isMounted.current) {
+              try {
+                const { data: matchedProfile } = await retrySupabaseSelect<any>(() => supabase
+                  .from('profiles')
+                  .select('id')
+                  .eq('email', decoded.email)
+                  .maybeSingle() as any);
+                if (matchedProfile && (matchedProfile as any).id) {
+                  finalId = (matchedProfile as any).id;
+                  console.log("Resolved NCP user email to existing Supabase profile ID:", finalId);
+                }
+              } catch (profileLookupErr) {
+                console.warn("Could not lookup profile by email:", profileLookupErr);
+              }
+            }
+
+            if (!isMounted.current) return false;
+
+            let ncpName = decoded.name;
+            let ncpEmail = decoded.email;
+            let ncpPhone = decoded.mobileNumber || '';
+            try {
+              const detailRes = await accountClient.get('/designer/detail');
+              if (detailRes && detailRes.data) {
+                if (detailRes.data.name && detailRes.data.name !== '디자이너' && detailRes.data.name !== '사용자') {
+                  ncpName = detailRes.data.name;
+                }
+                if (detailRes.data.email && !detailRes.data.email.endsWith('@ncp.local')) {
+                  ncpEmail = detailRes.data.email;
+                }
+                if (detailRes.data.mobileNumber || detailRes.data.phone) {
+                  ncpPhone = detailRes.data.mobileNumber || detailRes.data.phone;
+                }
+              }
+            } catch (detailErr) {
+              console.warn("[checkNcpSession] Live NCP detail fetch failed:", detailErr);
+            }
+
+            const synthesizedUser = {
+              id: finalId,
+              email: ncpEmail || `${rawId}@ncp.local`,
+              user_metadata: {
+                full_name: ncpName || '사용자',
+                phone: ncpPhone || ''
+              }
+            };
+            setUser(synthesizedUser as any);
+            setIsAuthInitialized(true);
+            
+            // Non-blocking welcome reward & profile activation check
+            try {
+              await ensureProfileExists(synthesizedUser as any);
+              await checkWelcomeReward(synthesizedUser as any);
+              await checkDailyReward(synthesizedUser as any);
+            } catch (err: any) {
+              console.warn("NCP user silent Supabase profile sync failed:", err.message);
+            }
+            return true;
+          }
+        } catch (e) {
+          console.warn("NCP session load failed, clearing ncp token.", e);
+          localStorage.removeItem('ncp_access_token');
+        }
+      }
+      return false;
+    };
+
+    const initAuth = async () => {
+      // Aggressive logout URL param interception
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('logout')) {
+        setUser(null);
+        setIsAuthInitialized(true);
+        try {
+          supabase.auth.signOut().catch(() => {});
+        } catch (_) {}
+        try {
+          const newUrl = window.location.pathname;
+          window.history.replaceState({}, document.title, newUrl);
+        } catch (_) {}
+        return;
+      }
+
+      const hasNcp = await checkNcpSession();
+      if (!hasNcp) {
+        // Fallback to Supabase
+        const { data: { session } } = await supabase.auth.getSession();
+        const currentUser = session?.user ?? null;
+        setUser(currentUser);
+        setIsAuthInitialized(true);
+        
+        if (currentUser) {
+          try {
+            await ensureProfileExists(currentUser);
+            await checkWelcomeReward(currentUser);
+            await checkDailyReward(currentUser);
+          } catch (err: any) {
+            console.warn("Supabase user rewards check failed:", err.message);
+          }
+        }
+      }
+    };
+
+    initAuth();
+
+    // Setup Supabase change listener as fallback/sync
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('logout')) {
+        setUser(null);
+        return;
+      }
+
+      const ncpToken = localStorage.getItem('ncp_access_token');
+      if (ncpToken) {
+        // If logged into NCP, let NCP take full precedence
+        await checkNcpSession();
+        return;
+      }
+      
       const currentUser = session?.user ?? null;
       setUser(currentUser);
       
       if (currentUser && (event === 'SIGNED_IN' || event === 'INITIAL_SESSION')) {
         const runRewards = async () => {
-          // 1. Ensure profile exists first
           await ensureProfileExists(currentUser);
-          // 2. Sequential execution to avoid Race Conditions on 'profiles' update
           await checkWelcomeReward(currentUser);
           await checkDailyReward(currentUser);
 
-          // 3. Log user login history (Phase 3 requirements)
           if (event === 'SIGNED_IN') {
              try {
                await supabase.from('login_histories').insert([{
                  profile_id: currentUser.id,
                  email: currentUser.email,
                  user_agent: navigator.userAgent,
-                 ip_address: 'CLIENT_IP_HIDDEN' // Real IP would be best retrieved server-side or via an API edge function.
+                 ip_address: 'CLIENT_IP_HIDDEN'
                }]);
              } catch (e: any) {
                if (e?.message !== 'Failed to fetch' && e?.message !== 'FetchError') {
@@ -438,8 +548,17 @@ function AppContent() {
         runRewards();
       }
     });
+    supabaseSub = subscription;
 
-    return () => subscription.unsubscribe();
+    const handleNcpAuthChanged = () => {
+      initAuth();
+    };
+    window.addEventListener('ncp_auth_changed', handleNcpAuthChanged);
+
+    return () => {
+      window.removeEventListener('ncp_auth_changed', handleNcpAuthChanged);
+      if (supabaseSub) supabaseSub.unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -489,6 +608,37 @@ function AppContent() {
     }
   }, []);
 
+  // Handle Supabase OAuth message events in the parent iframe / main application
+  useEffect(() => {
+    const handleMessage = async (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+
+      if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
+        const { session } = event.data;
+        if (session) {
+          console.log("Supabase OAuth session received from popup!", session);
+          try {
+            const { error } = await supabase.auth.setSession({
+              access_token: session.access_token,
+              refresh_token: session.refresh_token,
+            });
+            if (!error) {
+              console.log("Successfully synchronized login session inside parent client!");
+              setIsAuthOpen(false);
+            } else {
+              console.error("Failed to set session in parent client:", error.message);
+            }
+          } catch (e) {
+            console.error("Error synchronizing session in parent client:", e);
+          }
+        }
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
+
   const handleLoginSuccess = () => {
     setIsAuthOpen(false);
     navigate('/mypage/subscription');
@@ -502,9 +652,9 @@ function AppContent() {
     );
   }
 
-  const isSystemAdmin = user?.email === 'cubric.ceo@gmail.com';
+  const isSystemAdmin = (user?.email === 'cubric.ceo@gmail.com') || localStorage.getItem('ncp_admin') === 'true';
   
-  if (settings?.parkingPage?.enabled && !isSystemAdmin) {
+  if (settings?.parkingPage?.enabled && !isSystemAdmin && location.pathname !== '/admin/login') {
     return <ParkingPage />;
   }
 
@@ -526,11 +676,13 @@ function AppContent() {
         <Route path="/ai-hair-model" element={<AiHairModelPage user={user} />} />
         <Route path="/ai-hair-model_app" element={<AiHairModelAppPage user={user} />} />
         <Route path="/admin" element={<AdminPage user={user} />} />
+        <Route path="/admin/login" element={<AdminLoginPage />} />
         <Route path="/admin/site-editor" element={<SiteEditorPage user={user} />} />
         <Route path="/admin/shop" element={<ShopManagementPage user={user} />} />
         <Route path="/security-admin" element={<SecurityAdminPage user={user} />} />
         <Route path="/cs-admin" element={<CsAdminPage user={user} />} />
         <Route path="/support" element={<SupportPage user={user} />} />
+        <Route path="/auth/callback" element={<AuthCallbackPage />} />
         <Route path="/m/shop/:shopId/:tableNumber" element={<MobileShopView />} />
         
         {/* My Page Routes */}
@@ -542,7 +694,7 @@ function AppContent() {
         <Route path="/payment/billing-fail" element={<BillingFailPage />} />
         <Route path="/payment/success" element={<PaymentSuccessPage />} />
         <Route path="/payment/fail" element={<PaymentFailPage />} />
-        <Route path="/mypage/credits" element={<CreditsPage />} />
+        <Route path="/mypage/credits" element={<CreditsPage user={user} />} />
         <Route path="/mypage/reports" element={<ReportsPage />} />
         <Route path="/mypage/instagram" element={<InstagramPage />} />
         <Route path="/mypage/marketing" element={<MarketingPage />} />

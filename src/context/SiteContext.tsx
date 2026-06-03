@@ -57,7 +57,7 @@ export const SiteProvider = ({ children }: { children: ReactNode }) => {
              'sectionOrder', 'integrations',
              'seoSettings', 'promoSettings', 
              'partnerSettings', 'partners', 'parkingPage',
-             'popups', 'eventPosts'
+             'popups', 'eventPosts', 'creditSettings'
            ];
 
            keys.forEach(key => {
@@ -98,43 +98,50 @@ export const SiteProvider = ({ children }: { children: ReactNode }) => {
     localStorage.setItem('siteSettingsFallback', JSON.stringify(newSettings));
     setError(null);
 
+    // Try to update via secure backend proxy first to bypass client-side RLS limits
     try {
-      const { error } = await Promise.race([
-        supabase
-          .from('site_settings')
-          .upsert({ 
-            id: 'default',
-            updated_at: new Date().toISOString(),
-            // Legacy blob for dual-write compatibility
-            settings: newSettings,
-            // New individual columns for stability
-            nav: newSettings.nav,
-            hero: newSettings.hero,
-            features: newSettings.features,
-            ai_demo: newSettings.aiDemo,
-            pricing: newSettings.pricing,
-            cta: newSettings.cta,
-            footer: newSettings.footer,
-            layers: newSettings.layers,
-            section_order: newSettings.sectionOrder,
-            integrations: newSettings.integrations
-          }, { onConflict: 'id' }),
-        new Promise<any>((_, reject) => setTimeout(() => reject(new Error("Supabase Database Timeout")), 10000))
-      ]);
-      
-      if (error) {
-        if (error.code === '42P01') {
-           setError("site_settings 데이터베이스 테이블이 생성되지 않았습니다.\\nSupabase에서 테이블 생성 SQL을 실행해주세요.");
-           throw new Error("Table missing");
-        } else {
-           setError(error.message);
-           throw error;
-        }
+      // [명확한 서버 아키텍처 규칙 정의]
+      // 1. 사용자/점주 계정 : NCP 서버 기반 (회원가입, 크레딧, 구독 상태 - x-cubric-designer-token/NCP 토큰 기반)
+      // 2. 관리자 계정 : Supabase 서버 기반 (홈페이지 편집, 관리자 설정 및 파킹 페이지 제어 데이터, CS 어드민 데이터)
+      // 홈페이지 편집 및 파킹 페이지 활성화 등은 관리자 전용이며 Supabase 세션 토큰이 필수적입니다.
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token || null;
+
+      if (!token) {
+        throw new Error(
+          '관리자 인증 토큰을 찾을 수 없습니다.\n\n' +
+          '[안내] 일반 회원/점주 계정(NCP 서버 기반)과 홈페이지 관리자 계정(Supabase 서버 기반)은 서로 분리된 독립 서버를 이용합니다.\n' +
+          '파킹 페이지 설정 및 사이트 정보를 저장하시려면, 로그인 모달창 하단의 "관리자 로그인하기"를 클릭하시어 수퍼 관리자 계정(로그인 이메일/비밀번호)으로 로그인하신 후 시도해 주시기 바랍니다.'
+        );
       }
-    } catch (err) {
-      console.error(err);
-      // Re-throw to be handled by the UI
-      throw err;
+
+      const response = await fetch('/api/admin/site-settings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ newSettings })
+      });
+
+      if (response.ok) {
+        console.log('[SiteContext] Saved settings successfully via secure backend proxy.');
+        return;
+      } else {
+        const errData = await response.json().catch(() => ({}));
+        let errMsg = errData.error || `HTTP error ${response.status}: ${response.statusText}`;
+        if (response.status === 401 || response.status === 403) {
+          errMsg = 
+            '작업을 수행할 수 없습니다.\n\n' +
+            '[안내] 일반 회원 또는 잘못된 계정으로 로그인되어 관리자 권한이 부족합니다.\n' +
+            '홈페이지 관리자 권한을 가진 계정(이메일/비번 형태)으로 다시 로그인해 주십시오.';
+        }
+        throw new Error(errMsg);
+      }
+    } catch (proxyErr: any) {
+      console.error('[SiteContext] Failed saving via backend proxy:', proxyErr.message || proxyErr);
+      setError(proxyErr.message || '저장 중 오류가 발생했습니다.');
+      throw proxyErr;
     }
   };
 

@@ -109,8 +109,8 @@ export default function AiPortfolioGrid({ user, onBack, onShare }: { user: any, 
                                      <span className="mt-1">{item.caption?.split('\n').slice(1).join('\n')}</span>
                                   </p>
                                   <div className="text-blue-900 mt-1.5 font-medium flex flex-wrap gap-1">
-                                     {(item.tags || []).map((tag: string) => (
-                                        <span key={tag}>#{tag}</span>
+                                     {(item.tags || []).map((tag: string, tagIdx: number) => (
+                                        <span key={`${tag}-${tagIdx}`}>#{tag}</span>
                                      ))}
                                   </div>
                                  <div className="text-[10px] uppercase tracking-wider text-gray-400 font-bold mt-4">

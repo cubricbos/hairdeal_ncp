@@ -377,7 +377,7 @@ export default function MobileShopView() {
           <AnimatePresence mode="popLayout">
             {shop.top_banners.map((banner: any, i: number) => i === topBannerIndex && (
               <motion.div
-                key={banner.id || i}
+                key={`${banner.id || 'banner'}-${i}`}
                 initial={{ opacity: 0, x: 50 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -50 }}
@@ -571,7 +571,7 @@ export default function MobileShopView() {
             <AnimatePresence mode="popLayout">
               {shop.bottom_banners.map((banner: any, i: number) => i === bottomBannerIndex && (
                 <motion.div
-                  key={banner.id || i}
+                  key={`${banner.id || 'banner'}-${i}`}
                   initial={{ opacity: 0, x: -50 }}
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: 50 }}

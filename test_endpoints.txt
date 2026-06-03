@@ -1,0 +1,3 @@
+--- Probing Account Endpoints via axios.post ---
+[CANDIDATE] Account POST /designer : Status 400 {"timestamp":"2026-05-29T09:05:03.597+00:00","status":400,"error":"Bad Request","path":"/api/designer"}
+--- Probing Core Endpoints via axios.post ---

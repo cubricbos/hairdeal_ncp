@@ -3,7 +3,6 @@ import { motion, AnimatePresence } from 'motion/react';
 import { X } from 'lucide-react';
 import { useSiteContext } from '../context/SiteContext';
 import { useNavigate } from 'react-router-dom';
-import type { PopupSettings } from '../lib/siteSettings';
 
 export default function EventPopup() {
   const { settings } = useSiteContext();
@@ -18,7 +17,7 @@ export default function EventPopup() {
   );
 }
 
-function SinglePopup({ popup }: { popup: any }) {
+function SinglePopup({ popup }: { popup: any, key?: any }) {
   const navigate = useNavigate();
   const [isVisible, setIsVisible] = useState(false);
 

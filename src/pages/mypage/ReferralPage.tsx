@@ -36,57 +36,92 @@ export default function ReferralPage({ user }: ReferralPageProps) {
   const fetchData = async () => {
     try {
       setLoading(true);
-      // Fetch profile for referral code
-      const { data: profileData } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user?.id)
-        .single();
-      
-      let currentProfileData = profileData;
+      const deterministicCode = user ? btoa(user.id.replace(/-/g, '')).substring(0, 8).toUpperCase() : '';
 
-      if (!profileData?.referral_code && user) {
-        const newCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-        const { data: updatedProfile } = await supabase
+      // Fetch profile for referral code
+      let currentProfileData = null;
+      try {
+        let { data: profileData } = await supabase
           .from('profiles')
-          .update({ referral_code: newCode })
-          .eq('id', user.id)
-          .select()
-          .single();
-        if (updatedProfile) {
-          currentProfileData = updatedProfile;
+          .select('*')
+          .eq('id', user?.id)
+          .maybeSingle();
+        
+        if (!profileData && user?.email) {
+          const { data: emailProfile } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('email', user?.email)
+            .maybeSingle();
+          if (emailProfile) {
+            profileData = emailProfile;
+          }
         }
+
+        currentProfileData = profileData;
+
+        if (user && profileData && !profileData.referral_code) {
+          const { data: updatedProfile } = await supabase
+            .from('profiles')
+            .update({ referral_code: deterministicCode })
+            .eq('id', profileData.id)
+            .select()
+            .maybeSingle();
+          if (updatedProfile) {
+            currentProfileData = updatedProfile;
+          }
+        }
+      } catch (dbErr) {
+        console.warn("Database lookup failed during referral fetch, using local synthetic fallback:", dbErr);
+      }
+      
+      if (!currentProfileData && user) {
+        currentProfileData = {
+          id: user.id,
+          email: user.email || 'user@example.com',
+          full_name: user.user_metadata?.full_name || '원장님',
+          referral_code: deterministicCode,
+          credits: 0
+        };
       }
 
       setProfile(currentProfileData);
 
       // Fetch missions
-      const { data: missionsData } = await supabase
-        .from('referral_missions')
-        .select(`
-          id,
-          status,
-          created_at,
-          referred:profiles!referral_missions_referred_id_fkey (
+      try {
+        const { data: missionsData } = await supabase
+          .from('referral_missions')
+          .select(`
             id,
-            email,
-            full_name
-          )
-        `)
-        .eq('referrer_id', user?.id)
-        .order('created_at', { ascending: false });
+            status,
+            created_at,
+            referred:profiles!referral_missions_referred_id_fkey (
+              id,
+              email,
+              full_name
+            )
+          `)
+          .eq('referrer_id', user?.id)
+          .order('created_at', { ascending: false });
 
-      if (missionsData) {
-        setMissions(missionsData as any);
+        if (missionsData) {
+          setMissions(missionsData as any);
+        }
+      } catch (missErr) {
+         console.warn("Could not query referral_missions:", missErr);
       }
 
       // Fetch reward settings
-      const { data: metrics } = await supabase.from('app_metrics').select('referral_signup_reward, referral_activity_reward').eq('id', 1).single();
-      if (metrics) {
-        setRewardSettings({
-          signup: metrics.referral_signup_reward ?? 20,
-          activity: metrics.referral_activity_reward ?? 80
-        });
+      try {
+        const { data: metrics } = await supabase.from('app_metrics').select('referral_signup_reward, referral_activity_reward').eq('id', 1).maybeSingle();
+        if (metrics) {
+          setRewardSettings({
+            signup: metrics.referral_signup_reward ?? 20,
+            activity: metrics.referral_activity_reward ?? 80
+          });
+        }
+      } catch (metErr) {
+         console.warn("Could not query app_metrics for referral reward settings:", metErr);
       }
     } catch (error) {
       console.error('Error fetching referral data:', error);
@@ -114,7 +149,7 @@ export default function ReferralPage({ user }: ReferralPageProps) {
     let earned = 0;
     if (m.status === 'signup' || m.status === 'completed') earned += rewardSettings.signup;
     if (m.status === 'completed') earned += rewardSettings.activity;
-    return total;
+    return total + earned;
   }, 0);
 
   if (loading) {
@@ -218,7 +253,9 @@ export default function ReferralPage({ user }: ReferralPageProps) {
                   <div>
                     <div className="flex items-center gap-2 mb-1">
                       <span className="font-bold text-gray-900">{mission.referred?.full_name || '사용자'}</span>
-                      <span className="text-sm text-gray-500">({mission.referred?.email.substring(0, 3)}***)</span>
+                      <span className="text-sm text-gray-500">
+                        ({mission.referred?.email ? mission.referred.email.substring(0, 3) : '***'}***)
+                      </span>
                     </div>
                     <div className="text-sm text-gray-400 font-medium">
                       가입일: {new Date(mission.created_at).toLocaleDateString()}

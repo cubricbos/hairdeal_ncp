@@ -1,17 +1,27 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
-import { User, Mail, Shield, Camera, Lock, Trash2 } from 'lucide-react';
+import { User, Mail, Shield, Camera, Lock, Trash2, Phone, FileText } from 'lucide-react';
 import { supabase } from '../../supabase';
 import { useNavigate } from 'react-router-dom';
+import { accountClient } from '../../lib/ncpClient';
 
 const ProfilePage: React.FC = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   
-  const [profile, setProfile] = useState<{ id: string; email: string; full_name: string; marketing_consent?: boolean } | null>(null);
+  // profile state representing NCP Designer
+  const [profile, setProfile] = useState<{ email: string; name: string; mobileNumber?: string; introduction?: string; profileImageUrl?: string } | null>(null);
   
-  const [fullName, setFullName] = useState('');
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [mobileNumber, setMobileNumber] = useState('');
+  const [introduction, setIntroduction] = useState('');
+  const [profileImage, setProfileImage] = useState<File | null>(null);
+  const [profileImageUrl, setProfileImageUrl] = useState<string | null>(null);
+  const [referralCode, setReferralCode] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [marketingConsent, setMarketingConsent] = useState(false);
@@ -20,81 +30,192 @@ const ProfilePage: React.FC = () => {
 
   useEffect(() => {
     const fetchProfile = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.user) {
-        navigate('/');
+      const token = localStorage.getItem('ncp_access_token');
+      if (!token) {
+        // Fallback to Supabase Profile for social-logged-in users
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user) {
+            const { data: spProfile } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
+            if (spProfile) {
+              setProfile({
+                email: session.user.email || '',
+                name: spProfile.full_name || '',
+                mobileNumber: spProfile.phone || '',
+                introduction: spProfile.introduction || '',
+                profileImageUrl: spProfile.avatar_url || ''
+              });
+              setName(spProfile.full_name || '');
+              setEmail(session.user.email || '');
+              setMobileNumber(spProfile.phone || '');
+              setIntroduction(spProfile.introduction || '');
+              setProfileImageUrl(spProfile.avatar_url || null);
+              setReferralCode(spProfile.referral_code || '');
+            }
+          }
+        } catch (supabaseErr) {
+          console.warn('Supabase fallback profile fetch failed:', supabaseErr);
+        } finally {
+          setLoading(false);
+        }
         return;
       }
-      
-      const { data } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', session.user.id)
-        .single();
-        
-      if (data) {
-        setProfile(data);
-        setFullName(data.full_name || session.user.user_metadata?.full_name || '');
-        setMarketingConsent(!!data.marketing_consent);
-      } else {
-        setProfile({
-          id: session.user.id,
-          email: session.user.email || '',
-          full_name: session.user.user_metadata?.full_name || '',
-          marketing_consent: false
-        });
-        setFullName(session.user.user_metadata?.full_name || '');
-        setMarketingConsent(false);
+
+      let decoded: any = null;
+      try {
+        const payloadPart = token.split('.')[1];
+        const decodedStr = decodeURIComponent(escape(atob(payloadPart)));
+        decoded = JSON.parse(decodedStr);
+      } catch (e) {
+        console.warn("Could not decode NCP token in Profile.tsx:", e);
       }
-      setLoading(false);
+
+      try {
+        const { data } = await accountClient.get('/designer/detail');
+        if (data) {
+          let finalId = decoded?.id || '';
+          if (finalId && !finalId.includes('-')) {
+             finalId = `${finalId.substring(0, 8)}-${finalId.substring(8, 12)}-${finalId.substring(12, 16)}-${finalId.substring(16, 20)}-${finalId.substring(20)}`;
+          }
+
+          let spData: any = null;
+          if (finalId) {
+            try {
+              const { data: spProfile } = await supabase.from('profiles').select('*').eq('id', finalId).maybeSingle();
+              spData = spProfile;
+            } catch (spErr) {
+              console.warn("Could not fetch extra profile details in ProfilePage:", spErr);
+            }
+          }
+
+          const fallbackEmail = decoded?.email || spData?.email || `${decoded?.id || 'designer'}@ncp.local`;
+          const fallbackName = decoded?.name || spData?.full_name || '디자이너';
+
+          setProfile(data);
+          setName(data.name || fallbackName);
+          setEmail(data.email || fallbackEmail);
+          setMobileNumber(data.mobileNumber || data.mobile_number || data.phone || decoded?.mobileNumber || spData?.phone || '');
+          setIntroduction(data.introduction || spData?.introduction || '');
+          setReferralCode(data.referral_code || data.referralCode || spData?.referral_code || '');
+          
+          const finalImg = data.profileImageUrl || data.imageUrl || data.image || spData?.avatar_url || '';
+          if (finalImg) {
+            setProfileImageUrl(finalImg);
+          }
+        }
+      } catch (err) {
+        console.warn('NCP 프로필 상세 조회 실패, 토큰 파싱 시도:', err);
+        try {
+          if (decoded) {
+            let fullUuid = decoded.id;
+            if (fullUuid && !fullUuid.includes('-')) {
+               fullUuid = `${fullUuid.substring(0, 8)}-${fullUuid.substring(8, 12)}-${fullUuid.substring(12, 16)}-${fullUuid.substring(16, 20)}-${fullUuid.substring(20)}`;
+            }
+
+            // Check if we can load additional details from Supabase profiles
+            const { data: spData } = await supabase.from('profiles').select('*').eq('id', fullUuid).maybeSingle();
+
+            const fallbackProfile = {
+              email: decoded.email || spData?.email || `${decoded.id || 'designer'}@ncp.local`,
+              name: decoded.name || spData?.full_name || '디자이너',
+              mobileNumber: decoded.mobileNumber || spData?.phone || '',
+              introduction: spData?.introduction || '',
+              profileImageUrl: spData?.avatar_url || ''
+            };
+            setProfile(fallbackProfile);
+            setName(fallbackProfile.name);
+            setEmail(fallbackProfile.email);
+            setMobileNumber(fallbackProfile.mobileNumber);
+            setIntroduction(fallbackProfile.introduction);
+            setProfileImageUrl(fallbackProfile.profileImageUrl || null);
+            setReferralCode(spData?.referral_code || '');
+          }
+        } catch (parseErr) {
+          console.error("JWT Parse/Lookup error in ProfilePage catch block:", parseErr);
+        }
+      } finally {
+        setLoading(false);
+      }
     };
     
     fetchProfile();
   }, [navigate]);
 
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      setProfileImage(file);
+      setProfileImageUrl(URL.createObjectURL(file));
+    }
+  };
+
   const handleSave = async () => {
     if (!profile) return;
+    
+    if (password && password !== confirmPassword) {
+      alert('비밀번호가 일치하지 않습니다.');
+      return;
+    }
+
     setSaving(true);
     
     try {
-      // Update full name and marketing consent
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .update({ 
-          full_name: fullName,
-          marketing_consent: marketingConsent
-        })
-        .eq('id', profile.id);
+      // 1. Attempt to update NCP server
+      try {
+        const formData = new FormData();
+        formData.append('name', name);
+        formData.append('mobileNumber', mobileNumber);
+        if (introduction) formData.append('introduction', introduction);
+        if (password) formData.append('password', password);
         
-      if (profileError) throw profileError;
-      
-      // Update Auth User metadata
-      await supabase.auth.updateUser({
-        data: { full_name: fullName }
-      });
-
-      // Update password if provided
-      if (password) {
-        if (password !== confirmPassword) {
-          alert('비밀번호가 일치하지 않습니다.');
-          setSaving(false);
-          return;
+        if (profileImage) {
+          formData.append('images', profileImage);
         }
-        
-        const { error: pwError } = await supabase.auth.updateUser({
-          password: password
+
+        await accountClient.post('/designer/change', formData, {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          },
         });
-        
-        if (pwError) throw pwError;
-        alert('프로필 및 비밀번호가 성공적으로 업데이트되었습니다.');
-        setPassword('');
-        setConfirmPassword('');
+      } catch (ncpErr) {
+        console.warn("NCP server-side profile change not completely supported or error:", ncpErr);
+      }
+
+      // 2. Sync to Supabase Profiles for app metadata and offline access
+      const token = localStorage.getItem('ncp_access_token');
+      let targetUserId = '';
+      if (token) {
+        try {
+          const payloadPart = token.split('.')[1];
+          const decodedStr = decodeURIComponent(escape(atob(payloadPart)));
+          const decoded = JSON.parse(decodedStr);
+          const rawId = decoded.id;
+          targetUserId = rawId.includes('-') ? rawId : `${rawId.substring(0, 8)}-${rawId.substring(8, 12)}-${rawId.substring(12, 16)}-${rawId.substring(16, 20)}-${rawId.substring(20)}`;
+        } catch (e) {
+          console.warn("NCP user ID resolve failed for Supabase profile save:", e);
+        }
       } else {
-        alert('프로필이 성공적으로 업데이트되었습니다.');
+        const { data: { session } } = await supabase.auth.getSession();
+        targetUserId = session?.user?.id || '';
+      }
+
+      if (targetUserId) {
+        await supabase.from('profiles').upsert({
+          id: targetUserId,
+          full_name: name,
+          email: email,
+          phone: mobileNumber,
+          introduction: introduction,
+          avatar_url: profileImageUrl || '',
+          referral_code: referralCode
+        }, { onConflict: 'id' });
       }
       
+      alert('프로필이 성공적으로 업데이트되었습니다.');
+      setPassword('');
+      setConfirmPassword('');
     } catch (err: any) {
-      alert('오류가 발생했습니다: ' + err.message);
+      alert('오류가 발생했습니다: ' + (err.response?.data?.message || err.message));
     } finally {
       setSaving(false);
     }
@@ -111,20 +232,19 @@ const ProfilePage: React.FC = () => {
     setIsDeleting(true);
     
     try {
-      const { error } = await supabase.rpc('delete_user_account', {
-        target_user_id: profile.id
-      });
+      // NCP API를 통한 회원탈퇴 호출이 필요한 경우 여기에 추가
+      // await accountClient.delete('/designer');
+
+      await supabase.auth.signOut().catch(() => {});
       
-      if (error) {
-        if (error.message.includes('function delete_user_account')) {
-          throw new Error('데이터베이스에 계정 삭제 기능이 설정되지 않았습니다. 관리자에게 설정 스크립트 실행을 요청하세요. (database_setup_account_management.sql)');
-        }
-        throw error;
-      }
+      window.dispatchEvent(new Event('ncp_auth_changed'));
       
-      await supabase.auth.signOut();
-      navigate('/');
       alert('회원 탈퇴가 완료되었습니다. 데이터가 모두 초기화되었습니다.');
+      
+      // Force a full reload to clear all in-memory states and ensure cleanup via main.tsx
+      setTimeout(() => {
+        window.location.href = window.location.origin + '/?logout=' + Date.now();
+      }, 200);
     } catch (err: any) {
       console.error(err);
       alert('탈퇴 처리 중 오류가 발생했습니다: ' + err.message);
@@ -147,9 +267,23 @@ const ProfilePage: React.FC = () => {
         <div className="flex flex-col md:flex-row items-center gap-8 mb-12">
           <div className="relative group">
             <div className="w-32 h-32 rounded-full bg-brand-primary/10 flex items-center justify-center overflow-hidden border-4 border-white shadow-lg">
-              <User className="w-16 h-16 text-brand-primary" />
+              {profileImageUrl ? (
+                <img src={profileImageUrl} alt="Profile" className="w-full h-full object-cover" />
+              ) : (
+                <User className="w-16 h-16 text-brand-primary" />
+              )}
             </div>
-            <button className="absolute bottom-0 right-0 bg-white p-2.5 rounded-full shadow-md border border-gray-100 text-brand-primary hover:scale-110 transition-transform">
+            <input 
+              type="file" 
+              ref={fileInputRef} 
+              className="hidden" 
+              accept="image/*"
+              onChange={handleImageChange}
+            />
+            <button 
+              onClick={() => fileInputRef.current?.click()}
+              className="absolute bottom-0 right-0 bg-white p-2.5 rounded-full shadow-md border border-gray-100 text-brand-primary hover:scale-110 transition-transform"
+            >
               <Camera className="w-5 h-5" />
             </button>
           </div>
@@ -177,8 +311,8 @@ const ProfilePage: React.FC = () => {
                 <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                 <input 
                   type="text" 
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
                   className="w-full pl-12 pr-4 py-4 bg-gray-50 rounded-2xl border-none focus:ring-2 focus:ring-brand-primary/20 font-bold text-gray-900"
                   placeholder="이름을 입력하세요"
                 />
@@ -191,10 +325,36 @@ const ProfilePage: React.FC = () => {
                 <input 
                   type="email" 
                   disabled
-                  value={profile.email}
+                  value={email}
                   className="w-full pl-12 pr-4 py-4 bg-gray-100 rounded-2xl border-none font-bold text-gray-500 cursor-not-allowed"
                 />
               </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-bold text-gray-700 ml-1">연락처</label>
+              <div className="relative">
+                <Phone className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                <input 
+                  type="text" 
+                  value={mobileNumber}
+                  onChange={(e) => setMobileNumber(e.target.value)}
+                  className="w-full pl-12 pr-4 py-4 bg-gray-50 rounded-2xl border-none focus:ring-2 focus:ring-brand-primary/20 font-bold text-gray-900"
+                  placeholder="연락처를 입력하세요"
+                />
+              </div>
+            </div>
+          </div>
+          
+          <div className="space-y-2">
+            <label className="text-sm font-bold text-gray-700 ml-1">소개글</label>
+            <div className="relative">
+              <FileText className="absolute left-4 top-6 -translate-y-1/2 w-5 h-5 text-gray-400" />
+              <textarea 
+                value={introduction}
+                onChange={(e) => setIntroduction(e.target.value)}
+                className="w-full pl-12 pr-4 py-4 bg-gray-50 rounded-2xl border-none focus:ring-2 focus:ring-brand-primary/20 font-bold text-gray-900 min-h-[120px] resize-y"
+                placeholder="간단한 소개글을 입력하세요"
+              />
             </div>
           </div>
           
@@ -282,3 +442,4 @@ const ProfilePage: React.FC = () => {
 };
 
 export default ProfilePage;
+

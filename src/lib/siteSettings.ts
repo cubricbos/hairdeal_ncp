@@ -256,6 +256,9 @@ export interface SiteSettings {
     isPublished: boolean;
     createdAt: string;
   }[];
+  creditSettings?: {
+    chargeOptionsEnabled: boolean;
+  };
 }
 
 export interface LayerButton {
@@ -505,5 +508,8 @@ export const defaultSiteSettings: SiteSettings = {
       positionY: 50
     }
   ],
-  eventPosts: []
+  eventPosts: [],
+  creditSettings: {
+    chargeOptionsEnabled: false
+  }
 };

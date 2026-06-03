@@ -1,0 +1,141 @@
+src/components/Hero.tsx:109:               key={`bg-slider-${currentImageIndex}`}
+src/components/admin/ShopNotifier.tsx:88:            key={notif._nid}
+src/components/admin/SiteEditor.tsx:940:          `https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:generateContent?key=${apiKeyObj.key}`,
+src/components/admin/SiteEditor.tsx:1337:            `https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:generateContent?key=${apiKeyObj.key}`,
+src/components/admin/SiteEditor.tsx:2128:                        key={sectionId}
+src/components/admin/SiteEditor.tsx:2144:                      key={sectionId}
+src/components/admin/SiteEditor.tsx:2351:                              key={link.id}
+src/components/admin/SiteEditor.tsx:2385:                      <div key={item.key} className="relative">
+src/components/admin/SiteEditor.tsx:2510:                                  key={`bgimage-${imgId}`}
+src/components/admin/SiteEditor.tsx:3025:                          key={item.id}
+src/components/admin/SiteEditor.tsx:3551:                                    key={i}
+src/components/admin/SiteEditor.tsx:3633:                                                  <option key={sid} value={sid}>
+src/components/admin/SiteEditor.tsx:3745:                          key={partner.id}
+src/components/admin/SiteEditor.tsx:3897:                        <div key={popup.id} className="border border-gray-200 rounded-xl p-5 bg-gray-50 relative group">
+src/components/admin/SiteEditor.tsx:4128:                        <div key={post.id} className="border border-gray-100 rounded-xl p-4 bg-gray-50 relative group">
+src/components/admin/SiteEditor.tsx:4398:                          <label key={platform.id} className="flex items-center gap-2 bg-white px-4 py-2 rounded-xl border cursor-pointer hover:bg-gray-50 transition-colors">
+src/components/admin/SiteEditor.tsx:4618:                          <div key={item.id} className="border border-gray-100 rounded-xl p-4 hover:border-brand-primary/30 transition-colors">
+src/components/admin/SiteEditor.tsx:4628:                                    key={platform} 
+src/components/admin/SiteEditor.tsx:4791:                            key={s.id}
+src/components/admin/SiteEditor.tsx:4850:                              key={l.id}
+src/components/admin/SiteEditor.tsx:4906:                              key={l.id}
+src/components/admin/SiteEditor.tsx:5234:                        key={plan.id}
+src/components/admin/SiteEditor.tsx:5398:                                      key={feature.id}
+src/components/admin/SiteEditor.tsx:5565:                      <div key={item.id} className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden animate-in fade-in slide-in-from-bottom-4" style={{ animationDelay: `${idx * 50}ms` }}>
+src/components/admin/GeminiApiKeyManager.tsx:271:                key={apiKeyObj.id}
+src/components/admin/RichTextEditor.tsx:286:             <div key="html-editor-container" className="flex-1 flex flex-col h-full overflow-hidden">
+src/components/admin/RichTextEditor.tsx:320:               key="visual-editor-container"
+src/components/admin/IconPickerModal.tsx:84:                key={tab.id}
+src/components/admin/IconPickerModal.tsx:105:                      key={iconName}
+src/components/admin/IconPickerModal.tsx:124:                      key={iconName}
+src/components/admin/IconPickerModal.tsx:140:                     key={idx}
+src/components/AiMarketingDemo.tsx:338:                                key={style}
+src/components/AiMarketingDemo.tsx:358:                         key={modelGender}
+src/components/AiMarketingDemo.tsx:367:                               key={preset.id}
+src/components/AiMarketingDemo.tsx:418:                                        key={i}
+src/components/AiMarketingDemo.tsx:468:                                   <span key={tag} className="text-blue-700">#{tag}</span>
+src/components/PartnersSection.tsx:19:          <div key={`${partner.id}-${idx}`} className="flex-shrink-0 px-8 flex items-center justify-center">
+src/components/ChatWidget.tsx:379:                  key={msg.id} 
+src/components/ChatWidget.tsx:396:                            <Star key={i} className="w-4 h-4 fill-current" />
+src/components/ChatWidget.tsx:417:                      key={idx}
+src/components/ChatWidget.tsx:431:                         <button key={star} onClick={() => handleRating(star)} className="p-2 hover:scale-110 transition-transform">
+src/components/LayerSection.tsx:44:                    key={i}
+src/components/ChatbotEditor.tsx:220:              key={node.id}
+src/components/ChatbotEditor.tsx:311:                  <div key={i} className="flex flex-col gap-2 p-3 bg-gray-50 rounded-lg border border-gray-200 relative">
+src/components/ChatbotEditor.tsx:347:                             <option key={n.id} value={n.id}>{n.title || n.id}</option>
+src/components/Pricing.tsx:72:              key={plan.id}
+src/components/Pricing.tsx:104:                  <li key={feature.id} className="flex items-start gap-3 text-sm text-gray-600 font-medium">
+src/components/Features.tsx:40:              <React.Fragment key={i}>
+src/components/Features.tsx:65:                key={feature.id}
+src/components/LiveChatAdmin.tsx:207:                key={chat.id}
+src/components/LiveChatAdmin.tsx:249:                  <div key={msg.id} className={`flex max-w-[80%] ${msg.sender === 'admin' ? 'ml-auto' : 'mr-auto'}`}>
+src/components/AiPortfolioGrid.tsx:66:                        <div key={item.id} className="border-b border-gray-100 pb-4 mb-4" id={`post-${index}`}>
+src/components/AiPortfolioGrid.tsx:113:                                        <span key={tag}>#{tag}</span>
+src/components/AiPortfolioGrid.tsx:140:                            key={item.id} 
+src/components/Footer.tsx:106:                  key={item.id}
+src/components/EventPopup.tsx:14:        <SinglePopup key={popup.id} popup={popup} />
+src/components/AuthModal.tsx:1007:              <div key={i}>{line}</div>
+src/components/Navbar.tsx:187:                  <span>{(nav.logoText || 'AI_HAIR').split('_').map((part, i) => i === 1 ? <span key={i} className="text-brand-accent">{part}</span> : part)}</span>
+src/components/Navbar.tsx:206:                  key={link.id} 
+src/components/Navbar.tsx:538:                            key={link.id} 
+src/components/Navbar.tsx:569:                            key={link.id} 
+src/components/Navbar.tsx:614:                        key={idx} 
+src/pages/admin/ShopManagementPage.tsx:446:                    {SOUNDS.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+src/pages/admin/ShopManagementPage.tsx:466:                        key={table}
+src/pages/admin/ShopManagementPage.tsx:482:                    <div key={req.id} className={`p-5 rounded-xl border transition-all ${req.status === 'completed' || req.status === 'cancelled' ? 'bg-gray-50 border-gray-100 opacity-60' : 'bg-white border-brand-primary shadow-sm'}`}>
+src/pages/admin/ShopManagementPage.tsx:503:                                     <li key={i} className="flex justify-between items-center bg-gray-50 px-3 py-2 rounded-lg">
+src/pages/admin/ShopManagementPage.tsx:633:                          key={theme.id}
+src/pages/admin/ShopManagementPage.tsx:729:                <div key={drink.id} className="flex items-center gap-4 bg-gray-50 border border-gray-200 p-3 rounded-xl">
+src/pages/admin/ShopManagementPage.tsx:763:                 <div key={cat.id} className="bg-gray-50 border border-gray-200 p-5 rounded-xl">
+src/pages/admin/ShopManagementPage.tsx:776:                             <div key={itemIdx} className="flex items-center gap-3">
+src/pages/admin/ShopManagementPage.tsx:817:              <div key={banner.id} className="bg-gray-50 border border-gray-200 p-4 rounded-xl flex flex-col gap-3">
+src/pages/admin/ShopManagementPage.tsx:898:              <div key={banner.id} className="bg-gray-50 border border-gray-200 p-4 rounded-xl flex flex-col gap-3">
+src/pages/admin/ShopManagementPage.tsx:1025:                      <div key={tableIdx} className="bg-gray-50 border border-gray-200 p-4 rounded-2xl flex flex-col items-center text-center">
+src/pages/mypage/Marketing.tsx:159:                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+src/pages/mypage/Marketing.tsx:176:             <div key={idx} className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm flex items-center gap-5">
+src/pages/mypage/Subscription.tsx:203:            key={plan.id}
+src/pages/mypage/Subscription.tsx:244:                <div key={feature.id} className="flex items-start gap-3">
+src/pages/mypage/Instagram.tsx:310:                      key={post.id}
+src/pages/mypage/ReferralPage.tsx:215:                  key={mission.id} 
+src/pages/mypage/Billing.tsx:229:              <div key={i} className="px-8 py-6 flex justify-between items-center hover:bg-gray-50 transition-colors">
+src/pages/mypage/Reports.tsx:152:            key={idx}
+src/pages/mypage/Reports.tsx:194:              <div key={idx} className="space-y-2">
+src/pages/mypage/Credits.tsx:299:                key={idx} 
+src/pages/mypage/Credits.tsx:344:                <div key={t.id} className="px-8 py-6 flex justify-between items-center hover:bg-gray-50 transition-colors">
+src/pages/PartnersPage.tsx:61:                <div key={`${partner.id}-${idx}`} className="flex-shrink-0 px-8 flex items-center justify-center">
+src/pages/AdminPage.tsx:1914:                        key={stat.name}
+src/pages/AdminPage.tsx:1952:                            key={i}
+src/pages/AdminPage.tsx:1989:                              key={inquiry.id}
+src/pages/AdminPage.tsx:2061:                            key={inquiry.id}
+src/pages/AdminPage.tsx:2229:                    key={gender}
+src/pages/AdminPage.tsx:2256:                              key={style.id}
+src/pages/AdminPage.tsx:2522:                        key={model.id}
+src/pages/AdminPage.tsx:2665:                            key={profile.id}
+src/pages/AdminPage.tsx:2950:                            key={profile.id}
+src/pages/AdminPage.tsx:3130:                            key={log.id}
+src/pages/AdminPage.tsx:3282:                        <tr key={p.id} className="hover:bg-gray-50/50 transition-colors">
+src/pages/AdminPage.tsx:3416:                          key={i}
+src/pages/AdminPage.tsx:3587:                                key={email + i}
+src/pages/AdminPage.tsx:3762:                        key={t.id}
+src/pages/AiHairModelAppPage.tsx:797:              <div key={i}>{line}</div>
+src/pages/AiHairModelAppPage.tsx:955:                                        <span key={tag}>#{tag}</span>
+src/pages/AiHairModelAppPage.tsx:1027:                             key={`${style}-${index}`}
+src/pages/AiHairModelAppPage.tsx:1068:                               key={preset.id}
+src/pages/CsAdminPage.tsx:660:                  key="dashboard"
+src/pages/CsAdminPage.tsx:719:                                <Cell key={`cell-${index}`} fill={entry.fill} />
+src/pages/CsAdminPage.tsx:790:                  key="chats"
+src/pages/CsAdminPage.tsx:809:                  key="chatbot"
+src/pages/CsAdminPage.tsx:828:                  key="incidents"
+src/pages/CsAdminPage.tsx:1010:                              <tr key={inc.id} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">
+src/pages/CsAdminPage.tsx:1055:                  key="notices"
+src/pages/CsAdminPage.tsx:1092:                        <div key={notice.id} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 flex items-start justify-between gap-4">
+src/pages/CsAdminPage.tsx:1135:                  key="users"
+src/pages/CsAdminPage.tsx:1285:                              <tr key={u.id} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors text-sm">
+src/pages/MobileShopView.tsx:380:                key={banner.id || i}
+src/pages/MobileShopView.tsx:403:                <div key={i} className={`h-1.5 rounded-full transition-all ${i === topBannerIndex ? 'w-4 bg-brand-dynamic' : 'w-1.5 bg-gray-300'}`} />
+src/pages/MobileShopView.tsx:446:                  key={i}
+src/pages/MobileShopView.tsx:460:                <div key={i} className="min-w-full px-1 snap-start">
+src/pages/MobileShopView.tsx:464:                        <div key={j} className="flex items-center justify-between px-5 py-4 hover:bg-black/5">
+src/pages/MobileShopView.tsx:574:                  key={banner.id || i}
+src/pages/MobileShopView.tsx:597:                  <div key={i} className={`h-1.5 rounded-full transition-all ${i === bottomBannerIndex ? 'w-4 bg-gray-800' : 'w-1.5 bg-gray-300'}`} />
+src/pages/MobileShopView.tsx:651:                    <div key={i} className="flex items-center justify-between p-4 border border-black/5 rounded-2xl bg-black/5">
+src/pages/MobileShopView.tsx:740:                    <div key={item.id} className={`flex gap-4 p-4 rounded-2xl ${item.status === 'cancelled' ? 'bg-black/5 opacity-50' : 'bg-black/5'}`}>
+src/pages/AiHairModelPage.tsx:794:              <div key={i}>{line}</div>
+src/pages/AiHairModelPage.tsx:995:                             key={`${style}-${index}`}
+src/pages/AiHairModelPage.tsx:1043:                               key={preset.id}
+src/pages/AiHairModelPage.tsx:1199:                              {resultCaption.tags.map(t => <span key={t}>#{t}</span>)}
+src/pages/SecurityAdminPage.tsx:239:                          <tr key={log.id} className="hover:bg-gray-50/50 transition-colors">
+src/pages/SecurityAdminPage.tsx:310:                          <tr key={log.id} className="hover:bg-gray-50/50 transition-colors">
+src/pages/SecurityAdminPage.tsx:361:                    <div key={vendor.id} className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm relative group hover:shadow-md transition-shadow">
+src/pages/EventsPage.tsx:34:                key={event.id}
+src/pages/SupportPage.tsx:199:              key="notices"
+src/pages/SupportPage.tsx:214:                  <div key={notice.id} className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+src/pages/SupportPage.tsx:231:              key="events"
+src/pages/SupportPage.tsx:244:                  <div key={post.id} className="bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-100">
+src/pages/SupportPage.tsx:266:              key="inquiries"
+src/pages/SupportPage.tsx:301:                        <div key={inc.id} className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col md:flex-row md:items-start justify-between gap-6">
+src/App.tsx:64:            return <Features key="features" />;
+src/App.tsx:68:            return <AiMarketingDemo key="aiDemo" user={user} />;
+src/App.tsx:72:            return <Pricing key="pricing" />;
+src/App.tsx:76:            return <PartnersSection key="partners" />;
+src/App.tsx:80:            if (layer && !layer.hidden) return <LayerSection key={layer.id} layer={layer} />;

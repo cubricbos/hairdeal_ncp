@@ -8,11 +8,7 @@ import AuthModal from './AuthModal';
 export default function ParkingPage() {
   const { settings } = useSiteContext();
   const pp = settings?.parkingPage;
-  const [isAdminLoginOpen, setIsAdminLoginOpen] = useState(false);
-
-  const handleLoginSuccess = () => {
-    window.location.href = '/';
-  };
+  const navigate = useNavigate();
 
   if (!pp?.enabled) return null;
 
@@ -40,7 +36,7 @@ export default function ParkingPage() {
     >
       <button 
         className={`absolute top-8 right-8 transition-colors ${lockColor}`}
-        onClick={() => setIsAdminLoginOpen(true)}
+        onClick={() => navigate('/admin/login')}
       >
         <Lock className="w-5 h-5" />
       </button>
@@ -65,8 +61,6 @@ export default function ParkingPage() {
           />
         )}
       </div>
-      
-      <AuthModal isOpen={isAdminLoginOpen} onClose={() => setIsAdminLoginOpen(false)} onLoginSuccess={handleLoginSuccess} />
     </div>
   );
 }

@@ -1,10 +1,11 @@
 import { motion, AnimatePresence } from 'motion/react';
 import { Scissors, Menu, X, LogOut, LogIn, ChevronDown, ChevronLeft, ChevronRight, User as UserIcon, CreditCard, Receipt, Coins, BarChart, Instagram, PieChart, Sparkles, Shield, HelpCircle, Headset, Image, Layout, Store, Globe, UserPlus } from 'lucide-react';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { supabase } from '../supabase';
 import { User } from '@supabase/supabase-js';
 import { Link, useNavigate } from 'react-router-dom';
 import { useSiteContext } from '../context/SiteContext';
+import { retrySupabaseSelect } from '../lib/supabase-utils';
 
 interface NavbarProps {
   user: User | null;
@@ -25,8 +26,12 @@ export default function Navbar({ user }: NavbarProps) {
 
   const [userName, setUserName] = useState<string | null>(null);
   const [isCsAdmin, setIsCsAdmin] = useState(false);
+  
+  const isMounted = useRef(true);
+  const lastFetchTime = useRef(0);
 
   useEffect(() => {
+    isMounted.current = true;
     function handleClickOutside(event: MouseEvent) {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setIsProfileOpen(false);
@@ -36,7 +41,10 @@ export default function Navbar({ user }: NavbarProps) {
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    return () => {
+      isMounted.current = false;
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
   }, []);
 
   const changeLanguage = (lang: string) => {
@@ -74,45 +82,119 @@ export default function Navbar({ user }: NavbarProps) {
 
   const currentLang = localStorage.getItem('preferredLang') || 'ko';
 
-
-  useEffect(() => {
-    const fetchCredits = async () => {
-      if (user) {
-        setUserName(user.user_metadata?.full_name || '원장님');
-        if (user.email === 'cubric.ceo@gmail.com') setIsCsAdmin(true);
-        else setIsCsAdmin(false);
-        try {
-          const { data, error } = await supabase.from('profiles').select('credits, full_name, is_cs_admin, subscription_plan').eq('id', user.id).single();
-          let currentCredits = 0;
-          if (!error && data) {
-            if (data.credits !== undefined) currentCredits = data.credits;
-            if (data.full_name) setUserName(data.full_name);
-            if (data.is_cs_admin) setIsCsAdmin(true);
-            if (data.subscription_plan) setUserPlan(data.subscription_plan);
-          }
-          
-          // Calculate from transactions as a fallback
-          const { data: txs } = await supabase.from('credit_transactions').select('*').eq('user_id', user.id);
-          if (txs) {
-            const calculated = txs.reduce((acc, tx) => tx.type === 'earned' ? acc + tx.amount : acc - tx.amount, 0);
-            if (calculated !== currentCredits) {
-               currentCredits = calculated;
-               // Sync with profile
-               await supabase.from('profiles').update({ credits: currentCredits }).eq('id', user.id);
-            }
-          }
-          setUserCredits(currentCredits);
-        } catch (err: any) {
-          if (err?.message !== 'Failed to fetch' && err?.message !== 'FetchError') {
-            console.error("Failed to fetch credits", err);
-          }
-        }
-      } else {
+  const fetchCredits = useCallback(async () => {
+    if (!user || !isMounted.current) {
+      if (isMounted.current) {
         setUserCredits(null);
         setUserName(null);
         setIsCsAdmin(false);
       }
-    };
+      return;
+    }
+
+    // Throttle: avoid redundant fetches
+    const now = Date.now();
+    if (now - lastFetchTime.current < 2000) return;
+    lastFetchTime.current = now;
+
+    setUserName(user.user_metadata?.full_name || '원장님');
+    if (user.email === 'cubric.ceo@gmail.com') setIsCsAdmin(true);
+    else setIsCsAdmin(false);
+
+    try {
+      const ncpToken = localStorage.getItem('ncp_access_token');
+      let currentCredits = 0;
+      let plan = 'Free';
+      let foundNcp = false;
+      
+      if (ncpToken) {
+        try {
+          const payloadPart = ncpToken.split('.')[1];
+          const decodedStr = decodeURIComponent(escape(atob(payloadPart)));
+          const decoded = JSON.parse(decodedStr);
+          const ncpDesignerId = decoded.id;
+          
+          if (ncpDesignerId) {
+            const { apiClient } = await import('../lib/ncpClient');
+            try {
+              let res: any;
+              try {
+                res = await apiClient.get('/faceswap/credit');
+              } catch (err: any) {
+                console.log("Navbar: /faceswap/credit failed, trying /summary fallback...");
+                res = await apiClient.get('/faceswap/credit/summary');
+              }
+              
+              if (res.data?.credit !== undefined) {
+                currentCredits = res.data.credit;
+                if (isMounted.current) {
+                  setUserName(decoded.name || decoded.name_en || decoded.full_name || user.user_metadata?.full_name || '디자이너');
+                }
+                foundNcp = true;
+              } else if (res.data?.credits !== undefined) {
+                currentCredits = res.data.credits;
+                if (isMounted.current) {
+                  setUserName(decoded.name || decoded.name_en || decoded.full_name || user.user_metadata?.full_name || '디자이너');
+                }
+                foundNcp = true;
+              }
+            } catch (summaryErr: any) {
+              if (summaryErr?.response?.status !== 500) {
+                console.warn("Summary credit API failed in navbar, using token name fallback", summaryErr);
+              }
+              if (isMounted.current) {
+                setUserName(decoded.name || decoded.name_en || decoded.full_name || user.user_metadata?.full_name || '디자이너');
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("NCP Parse error in navbar fetchCredits", e);
+        }
+      }
+      
+      const { data, error } = await retrySupabaseSelect<any>(() => supabase.from('profiles').select('credits, full_name, is_cs_admin, subscription_plan').eq('id', user.id).maybeSingle() as any);
+      if (isMounted.current && !error && data) {
+        if (!foundNcp && (data as any).credits !== undefined) currentCredits = (data as any).credits;
+        const profileFullName = (data as any).full_name;
+        if (profileFullName) {
+          setUserName((prevName) => {
+            if (!prevName || prevName === '디자이너' || prevName === '원장님' || prevName === '사용자') {
+              return profileFullName;
+            }
+            return prevName;
+          });
+        }
+        if ((data as any).is_cs_admin) setIsCsAdmin(true);
+        if ((data as any).subscription_plan) {
+          plan = (data as any).subscription_plan;
+        }
+      }
+      
+      if (!foundNcp) {
+        // Calculate from transactions as a fallback
+        const { data: txs } = await retrySupabaseSelect<any>(() => supabase.from('credit_transactions').select('*').eq('user_id', user.id) as any);
+        if (txs) {
+          const calculated = (txs as any[]).reduce((acc, tx) => tx.type === 'earned' ? acc + tx.amount : acc - tx.amount, 0);
+          if (calculated !== currentCredits) {
+             currentCredits = calculated;
+             // Sync with profile (non-blocking)
+             supabase.from('profiles').update({ credits: currentCredits }).eq('id', user.id).then();
+          }
+        }
+      }
+      
+      if (isMounted.current) {
+        setUserCredits(currentCredits);
+        setUserPlan(plan);
+      }
+    } catch (err: any) {
+      if (err?.message !== 'Failed to fetch' && err?.message !== 'FetchError') {
+        console.error("Failed to fetch credits", err);
+      }
+    }
+  }, [user]);
+
+  useEffect(() => {
     fetchCredits();
 
     // Set up Realtime subscription
@@ -126,7 +208,7 @@ export default function Navbar({ user }: NavbarProps) {
           table: 'profiles',
           filter: `id=eq.${user.id}`
         }, (payload) => {
-          if (payload.new) {
+          if (isMounted.current && payload.new) {
             if (payload.new.credits !== undefined) {
               setUserCredits(payload.new.credits);
             }
@@ -142,19 +224,47 @@ export default function Navbar({ user }: NavbarProps) {
       subscription = channel.subscribe();
     }
 
-    window.addEventListener('credits_updated', fetchCredits);
+    const onCreditsUpdated = () => {
+      fetchCredits();
+    };
+    window.addEventListener('credits_updated', onCreditsUpdated);
     return () => {
-      window.removeEventListener('credits_updated', fetchCredits);
+      window.removeEventListener('credits_updated', onCreditsUpdated);
       if (subscription) {
         supabase.removeChannel(subscription);
       }
     };
-  }, [user]);
+  }, [user, fetchCredits]);
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
-    setIsProfileOpen(false);
-    navigate('/');
+    try {
+      setIsProfileOpen(false);
+      setIsOpen(false);
+
+      // Trigger sign out from Supabase as non-blocking background task to prevent hanging network calls from delaying UI clearing
+      supabase.auth.signOut().catch(() => {});
+    } catch (e) {
+      console.warn("Supabase auth signOut error", e);
+    }
+
+    // 2. Clear all local/session storage and cookies completely
+    localStorage.removeItem('ncp_access_token');
+    localStorage.removeItem('ncp_refresh_token');
+    localStorage.removeItem('ncp_admin');
+    localStorage.clear();
+    sessionStorage.clear();
+    
+    document.cookie.split(";").forEach((c) => {
+      document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
+    });
+
+    // 3. Dispatch events to immediately decouple UI from user session
+    window.dispatchEvent(new Event('ncp_auth_changed'));
+
+    // 4. Smooth hard-redirection sequence to root with cache-busting timestamp
+    setTimeout(() => {
+      window.location.replace(window.location.origin + '/?logout=' + Date.now());
+    }, 100);
   };
 
   const userHasShopAccess = () => {
@@ -369,7 +479,7 @@ export default function Navbar({ user }: NavbarProps) {
 
                         <div className="border-t border-gray-100 mt-2 pt-2">
                           <button 
-                            onClick={handleLogout}
+                            onClick={(e) => { e.stopPropagation(); handleLogout(); }}
                             className="flex items-center gap-3 px-5 py-2.5 text-sm font-bold text-red-600 hover:bg-red-50 transition-colors w-full text-left"
                           >
                             <LogOut className="w-4 h-4" /> 로그아웃
@@ -553,7 +663,7 @@ export default function Navbar({ user }: NavbarProps) {
                         </button>
 
                         <button 
-                          onClick={() => { setIsOpen(false); handleLogout(); }}
+                          onClick={(e) => { e.stopPropagation(); handleLogout(); setIsOpen(false); }}
                           className="flex items-center gap-3.5 py-4.5 px-6 text-[17px] font-bold text-red-500 hover:bg-red-50 rounded-2xl mt-4 active:scale-95 transition-transform"
                         >
                           <LogOut className="w-5.5 h-5.5" />
