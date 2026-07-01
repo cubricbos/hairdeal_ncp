@@ -1,11 +1,13 @@
 import { motion, AnimatePresence } from 'motion/react';
-import { Scissors, Menu, X, LogOut, LogIn, ChevronDown, ChevronLeft, ChevronRight, User as UserIcon, CreditCard, Receipt, Coins, BarChart, Instagram, PieChart, Sparkles, Shield, HelpCircle, Headset, Image, Layout, Store, Globe, UserPlus } from 'lucide-react';
+import { Scissors, Menu, X, LogOut, LogIn, ChevronDown, ChevronLeft, ChevronRight, User as UserIcon, CreditCard, Receipt, Coins, BarChart, Instagram, PieChart, Sparkles, Shield, HelpCircle, Headset, Image, Layout, Store, Globe, UserPlus, QrCode } from 'lucide-react';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { supabase } from '../supabase';
 import { User } from '@supabase/supabase-js';
 import { Link, useNavigate } from 'react-router-dom';
 import { useSiteContext } from '../context/SiteContext';
-import { retrySupabaseSelect } from '../lib/supabase-utils';
+import { retrySupabaseSelect, safeJwtDecode } from '../lib/supabase-utils';
+import { AvatarImage } from './AvatarImage';
+import { accountClient } from '../lib/ncpClient';
 
 interface NavbarProps {
   user: User | null;
@@ -18,6 +20,7 @@ export default function Navbar({ user }: NavbarProps) {
   const [menuView, setMenuView] = useState<'main' | 'mypage'>('main');
   const [userCredits, setUserCredits] = useState<number | null>(null);
   const [userPlan, setUserPlan] = useState<string | null>(null);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const langRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
@@ -26,6 +29,7 @@ export default function Navbar({ user }: NavbarProps) {
 
   const [userName, setUserName] = useState<string | null>(null);
   const [isCsAdmin, setIsCsAdmin] = useState(false);
+
   
   const isMounted = useRef(true);
   const lastFetchTime = useRef(0);
@@ -82,7 +86,7 @@ export default function Navbar({ user }: NavbarProps) {
 
   const currentLang = localStorage.getItem('preferredLang') || 'ko';
 
-  const fetchCredits = useCallback(async () => {
+  const fetchCredits = useCallback(async (force: boolean = false) => {
     if (!user || !isMounted.current) {
       if (isMounted.current) {
         setUserCredits(null);
@@ -94,7 +98,7 @@ export default function Navbar({ user }: NavbarProps) {
 
     // Throttle: avoid redundant fetches
     const now = Date.now();
-    if (now - lastFetchTime.current < 2000) return;
+    if (!force && now - lastFetchTime.current < 2000) return;
     lastFetchTime.current = now;
 
     setUserName(user.user_metadata?.full_name || '원장님');
@@ -109,10 +113,8 @@ export default function Navbar({ user }: NavbarProps) {
       
       if (ncpToken) {
         try {
-          const payloadPart = ncpToken.split('.')[1];
-          const decodedStr = decodeURIComponent(escape(atob(payloadPart)));
-          const decoded = JSON.parse(decodedStr);
-          const ncpDesignerId = decoded.id;
+          const decoded = safeJwtDecode(ncpToken);
+          const ncpDesignerId = decoded?.id;
           
           if (ncpDesignerId) {
             const { apiClient } = await import('../lib/ncpClient');
@@ -128,13 +130,13 @@ export default function Navbar({ user }: NavbarProps) {
               if (res.data?.credit !== undefined) {
                 currentCredits = res.data.credit;
                 if (isMounted.current) {
-                  setUserName(decoded.name || decoded.name_en || decoded.full_name || user.user_metadata?.full_name || '디자이너');
+                  setUserName(decoded?.name || decoded?.name_en || decoded?.full_name || user.user_metadata?.full_name || '디자이너');
                 }
                 foundNcp = true;
               } else if (res.data?.credits !== undefined) {
                 currentCredits = res.data.credits;
                 if (isMounted.current) {
-                  setUserName(decoded.name || decoded.name_en || decoded.full_name || user.user_metadata?.full_name || '디자이너');
+                  setUserName(decoded?.name || decoded?.name_en || decoded?.full_name || user.user_metadata?.full_name || '디자이너');
                 }
                 foundNcp = true;
               }
@@ -143,7 +145,7 @@ export default function Navbar({ user }: NavbarProps) {
                 console.warn("Summary credit API failed in navbar, using token name fallback", summaryErr);
               }
               if (isMounted.current) {
-                setUserName(decoded.name || decoded.name_en || decoded.full_name || user.user_metadata?.full_name || '디자이너');
+                setUserName(decoded?.name || decoded?.name_en || decoded?.full_name || user.user_metadata?.full_name || '디자이너');
               }
             }
           }
@@ -167,6 +169,64 @@ export default function Navbar({ user }: NavbarProps) {
         if ((data as any).is_cs_admin) setIsCsAdmin(true);
         if ((data as any).subscription_plan) {
           plan = (data as any).subscription_plan;
+        }
+      }
+      
+      const metaAvatar = user.user_metadata?.avatar_url;
+      if (metaAvatar && isMounted.current) {
+        setAvatarUrl(metaAvatar);
+      }
+
+      // Background sync latest designer detail image candidates
+      try {
+        accountClient.get(`/designer/detail?_t=${Date.now()}`).then(detailRes => {
+          if (detailRes && detailRes.data && isMounted.current) {
+            const cands: string[] = [];
+            const pf = detailRes.data.profile;
+            if (pf) {
+              if (Array.isArray(pf.details) && typeof pf.details[0] === 'string') {
+                cands.push(`https://api.cubric.io/api/storage?fileName=${pf.details[0]}`);
+              }
+              if (pf.thumbNailPath) cands.push(pf.thumbNailPath);
+              if (pf.fileName) cands.push(pf.fileName);
+              if (pf.savedFileName) cands.push(pf.savedFileName);
+              if (pf.savedPath) cands.push(pf.savedPath);
+              if (pf.path) cands.push(pf.path);
+              if (pf.id) cands.push(pf.id);
+              if (pf.fileId) cands.push(pf.fileId);
+              if (pf.file_id) cands.push(pf.file_id);
+            }
+            if (detailRes.data.file_id) cands.push(detailRes.data.file_id);
+            if (detailRes.data.fileId) cands.push(detailRes.data.fileId);
+            const directOpts = [detailRes.data.profileImageUrl, detailRes.data.profileImage, detailRes.data.imageUrl, detailRes.data.image, detailRes.data.avatarUrl, detailRes.data.avatar_url];
+            directOpts.forEach(u => { if (u) cands.push(u); });
+            
+            // Check for freshly uploaded Blob URL on the same window
+            const tempBlob = localStorage.getItem('temp_profile_blob');
+            if (tempBlob) {
+              cands.unshift(tempBlob);
+            }
+
+            if (cands.length > 0) {
+              const freshImg = Array.from(new Set(cands)).join(',');
+              setAvatarUrl(freshImg);
+            }
+            if (detailRes.data.name) {
+              setUserName(detailRes.data.name);
+            }
+          }
+        }).catch(err => {
+          console.warn("NCP profile meta synchronization bypassed in Navbar:", err);
+          const tempBlob = localStorage.getItem('temp_profile_blob');
+          if (tempBlob) {
+            setAvatarUrl(tempBlob);
+          }
+        });
+      } catch (err) {
+        // Ignored
+        const tempBlob = localStorage.getItem('temp_profile_blob');
+        if (tempBlob) {
+          setAvatarUrl(tempBlob);
         }
       }
       
@@ -218,6 +278,9 @@ export default function Navbar({ user }: NavbarProps) {
             if (payload.new.subscription_plan !== undefined) {
               setUserPlan(payload.new.subscription_plan);
             }
+            if (payload.new.avatar_url !== undefined) {
+              setAvatarUrl(payload.new.avatar_url);
+            }
           }
         });
       
@@ -225,11 +288,16 @@ export default function Navbar({ user }: NavbarProps) {
     }
 
     const onCreditsUpdated = () => {
-      fetchCredits();
+      fetchCredits(true);
+    };
+    const onProfileUpdated = () => {
+      fetchCredits(true);
     };
     window.addEventListener('credits_updated', onCreditsUpdated);
+    window.addEventListener('profile_updated', onProfileUpdated);
     return () => {
       window.removeEventListener('credits_updated', onCreditsUpdated);
+      window.removeEventListener('profile_updated', onProfileUpdated);
       if (subscription) {
         supabase.removeChannel(subscription);
       }
@@ -261,9 +329,9 @@ export default function Navbar({ user }: NavbarProps) {
     // 3. Dispatch events to immediately decouple UI from user session
     window.dispatchEvent(new Event('ncp_auth_changed'));
 
-    // 4. Smooth hard-redirection sequence to root with cache-busting timestamp
+    // 4. Navigate nicely instead of breaking iframe with hard location replaces
     setTimeout(() => {
-      window.location.replace(window.location.origin + '/?logout=' + Date.now());
+      navigate('/?logout=' + Date.now(), { replace: true });
     }, 100);
   };
 
@@ -312,13 +380,13 @@ export default function Navbar({ user }: NavbarProps) {
 
             <div className="hidden md:flex items-center gap-10">
               {nav?.links?.filter(l => !l.hidden).map((link) => (
-                <a 
+                <Link 
                   key={link.id} 
-                  href={link.href.startsWith('#') ? '/' + link.href : link.href} 
+                  to={link.href ? (link.href.startsWith('#') ? '/' + link.href : link.href) : '#'} 
                   className="text-[15px] font-bold text-text-light hover:text-brand-primary transition-colors"
                 >
                   {link.label}
-                </a>
+                </Link>
               ))}
               
               <div className="relative" ref={langRef}>
@@ -354,11 +422,7 @@ export default function Navbar({ user }: NavbarProps) {
                     className="flex items-center gap-3 bg-gray-50 hover:bg-gray-100 border border-gray-100 px-4 py-2 rounded-full transition-all"
                   >
                     <div className="w-8 h-8 rounded-full bg-brand-primary/10 flex items-center justify-center overflow-hidden">
-                      {user.user_metadata?.avatar_url ? (
-                        <img src={user.user_metadata.avatar_url || "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=100&q=80"} alt="Profile" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                      ) : (
-                        <UserIcon className="w-4 h-4 text-brand-primary" />
-                      )}
+                      <AvatarImage url={avatarUrl || user.user_metadata?.avatar_url} fallbackClassName="w-4 h-4 text-brand-primary" />
                     </div>
                     <span className="text-sm font-bold text-text-dark flex flex-col items-start leading-tight">
                       <span>{userName || '원장님'}</span>
@@ -421,9 +485,12 @@ export default function Navbar({ user }: NavbarProps) {
                           )}
                           
                           <hr className="border-gray-100 my-1" />
+                          <Link to="/admin/store" onClick={() => setIsProfileOpen(false)} className="flex items-center gap-3 px-5 py-2.5 text-sm font-bold text-gray-900 bg-gray-50 hover:bg-gray-100 transition-colors text-left border-l-2 border-teal-500">
+                            <Store className="w-4 h-4 text-brand-primary" /> 매장 관리
+                          </Link>
                           {isShopVisible && (
                             <Link to="/admin/shop" onClick={() => setIsProfileOpen(false)} className="flex items-center gap-3 px-5 py-2.5 text-sm font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 transition-colors text-left border-l-2 border-blue-500">
-                              <Store className="w-4 h-4" /> {settings.nav.mypageMenu?.shop || 'QR 서비스 관리'}
+                              <QrCode className="w-4 h-4" /> QR 서비스 관리
                             </Link>
                           )}
                           {!settings.nav.mypageMenuVisibility?.profile && (
@@ -551,11 +618,7 @@ export default function Navbar({ user }: NavbarProps) {
                   user && (
                     <div className="flex items-center gap-2.5 min-w-0 flex-1 mr-2">
                       <div className="w-11 h-11 rounded-full bg-brand-primary/10 flex items-center justify-center overflow-hidden shrink-0 border border-brand-primary/10">
-                        {user.user_metadata?.avatar_url ? (
-                          <img src={user.user_metadata.avatar_url || "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=100&q=80"} alt="Profile" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                        ) : (
-                          <UserIcon className="w-5.5 h-5.5 text-brand-primary" />
-                        )}
+                        <AvatarImage url={avatarUrl || user.user_metadata?.avatar_url} fallbackClassName="w-5.5 h-5.5 text-brand-primary" />
                       </div>
                       <div className="min-w-0 flex-1">
                         <p className="text-[15px] font-bold text-gray-900 truncate tracking-tight flex items-center gap-1.5 border-b border-transparent">
@@ -644,14 +707,14 @@ export default function Navbar({ user }: NavbarProps) {
                       </div>
                       <div className="border-t border-gray-100 mt-2 pt-2">
                         {nav?.links?.filter(l => !l.hidden).map((link) => (
-                          <a 
+                          <Link 
                             key={link.id} 
-                            href={link.href.startsWith('#') ? '/' + link.href : link.href} 
+                            to={link.href ? (link.href.startsWith('#') ? '/' + link.href : link.href) : '#'} 
                             onClick={() => setIsOpen(false)} 
                             className="flex items-center py-4.5 px-5 text-[17px] font-bold text-gray-800 hover:text-brand-primary hover:bg-gray-50 rounded-2xl transition-colors"
                           >
                             {link.label}
-                          </a>
+                          </Link>
                         ))}
 
                         <button 
@@ -675,14 +738,14 @@ export default function Navbar({ user }: NavbarProps) {
                       /* LOGGED OUT MENU */
                       <>
                         {nav?.links?.filter(l => !l.hidden).map((link) => (
-                          <a 
+                          <Link 
                             key={link.id} 
-                            href={link.href.startsWith('#') ? '/' + link.href : link.href} 
+                            to={link.href ? (link.href.startsWith('#') ? '/' + link.href : link.href) : '#'} 
                             onClick={() => setIsOpen(false)} 
                             className="flex items-center py-4.5 px-5 text-[17px] font-bold text-gray-800 hover:text-brand-primary hover:bg-gray-50 rounded-2xl transition-colors"
                           >
                             {link.label}
-                          </a>
+                          </Link>
                         ))}
                         <button 
                           onClick={() => { setIsOpen(false); window.dispatchEvent(new CustomEvent('open-auth')); }}
@@ -706,7 +769,8 @@ export default function Navbar({ user }: NavbarProps) {
 
                   <div className="flex flex-col gap-1 pb-10">
                     {[
-                      { key: 'shop', icon: Store, label: settings.nav.mypageMenu?.shop || 'QR 서비스 관리', path: '/admin/shop' },
+                      { key: 'store_manage', icon: Store, label: '매장 관리', path: '/admin/store' },
+                      { key: 'shop', icon: QrCode, label: 'QR 서비스 관리', path: '/admin/shop' },
                       { key: 'profile', icon: UserIcon, label: settings.nav.mypageMenu?.profile || '프로필 정보', path: '/mypage/profile' },
                       { key: 'portfolio', icon: Image, label: settings.nav.mypageMenu?.portfolio || '포트폴리오', path: '/mypage/portfolio' },
                       { key: 'subscription', icon: CreditCard, label: settings.nav.mypageMenu?.subscription || '구독관리', path: '/mypage/subscription' },
@@ -718,6 +782,7 @@ export default function Navbar({ user }: NavbarProps) {
                       { key: 'referral', icon: UserPlus, label: settings.nav.mypageMenu?.referral || '친구 추천 (안내)', path: '/mypage/referral' }
                     ].filter(item => {
                       if (item.key === 'shop') return isShopVisible;
+                      if (item.key === 'store_manage') return true;
                       return !settings.nav.mypageMenuVisibility?.[item.key];
                     }).map((item, idx) => (
                       <button 

@@ -12,12 +12,15 @@ import PartnersSection from './components/PartnersSection';
 import { motion } from 'motion/react';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useSiteContext } from './context/SiteContext';
+import { defaultSiteSettings } from './lib/siteSettings';
 import AiHairModelPage from './pages/AiHairModelPage';
 import AiHairModelAppPage from './pages/AiHairModelAppPage';
 import AdminPage from './pages/AdminPage'; // Import AdminPage
 import AdminLoginPage from './pages/admin/AdminLoginPage';
 import SiteEditorPage from './pages/admin/SiteEditorPage'; // Import SiteEditorPage
 import ShopManagementPage from './pages/admin/ShopManagementPage'; // O2O Manager
+import StoreManagementPage from './pages/admin/StoreManagementPage'; // Store Profile Management
+import TestPage from './pages/admin/TestPage';
 import CsAdminPage from './pages/CsAdminPage'; // Import CsAdminPage
 import SupportPage from './pages/SupportPage'; // Import SupportPage
 import PartnersPage from './pages/PartnersPage'; // Import PartnersPage
@@ -42,14 +45,14 @@ import ParkingPage from './components/ParkingPage';
 import { supabase } from './supabase';
 import { User } from '@supabase/supabase-js';
 import { accountClient } from './lib/ncpClient';
-import { retrySupabaseSelect } from './lib/supabase-utils';
+import { retrySupabaseSelect, safeJwtDecode } from './lib/supabase-utils';
 
 function LandingPage({ setIsAuthOpen, user }: { setIsAuthOpen: (val: boolean) => void, user: User | null }) {
   const { settings, isLoading } = useSiteContext();
-  const [isFirstLoad] = useState(!localStorage.getItem('siteSettingsFallback'));
   const order = settings?.sectionOrder || ['features', 'aiDemo', 'pricing', 'partners', 'layer_1'];
 
-  if (isFirstLoad && isLoading) {
+  // Only show full black screem loading if absolutely NO settings are loaded and it's fetching
+  if (isLoading && settings === defaultSiteSettings) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: '#000000' }}>
         <div className="w-8 h-8 border-4 border-white/20 border-t-white rounded-full animate-spin" />
@@ -96,6 +99,7 @@ function AppContent() {
   const location = useLocation();
   const { settings } = useSiteContext();
   const isMounted = useRef(true);
+  const lastVerifiedNcpToken = useRef<string | null>(null);
 
   useEffect(() => {
     isMounted.current = true;
@@ -168,6 +172,9 @@ function AppContent() {
   }, [settings?.seoSettings]);
 
   useEffect(() => {
+    const isSystemAdmin = (user?.email === 'cubric.ceo@gmail.com') || (localStorage.getItem('ncp_admin') === 'true');
+    if (isSystemAdmin) return;
+
     const hiddenRoutes: Record<string, string> = {
       '/ai-hair-model': 'aiModel',
       '/ai-hair-model_app': 'aiModel',
@@ -189,7 +196,7 @@ function AppContent() {
     if (currKey && settings?.nav?.mypageMenuVisibility?.[currKey]) {
       navigate('/', { replace: true });
     }
-  }, [location.pathname, settings?.nav?.mypageMenuVisibility, navigate]);
+  }, [location.pathname, settings?.nav?.mypageMenuVisibility, navigate, user]);
 
   useEffect(() => {
     // Check for referral code in URL
@@ -388,81 +395,191 @@ function AppContent() {
     const checkNcpSession = async () => {
       const ncpToken = localStorage.getItem('ncp_access_token');
       if (ncpToken) {
+        // Prevent redundant heavy background API calls if token hasn't changed and user state exists
+        if (lastVerifiedNcpToken.current === ncpToken && user) {
+          return true;
+        }
+
         try {
-          // Decode JWT payload instead of hitting broken /designer/detail mapping
-          const payloadPart = ncpToken.split('.')[1];
-          const decodedStr = decodeURIComponent(escape(atob(payloadPart)));
-          const decoded = JSON.parse(decodedStr);
+          // Decode JWT payload safely
+          const decoded = safeJwtDecode(ncpToken);
           
           if (decoded && decoded.id) {
+            const isExpired = decoded.exp ? (decoded.exp * 1000) < Date.now() : false;
+            
+            if (isExpired) {
+              console.warn("[checkNcpSession] NCP token is expired (by local JWT parse). Attempting to refresh via Supabase session if available or force re-authenticate.");
+              const { data: { session: supaSession } } = await supabase.auth.getSession();
+              if (supaSession?.user?.id) {
+                 const fallbackNcpId = supaSession.user.id.replace(/-/g, '');
+                 let fetchSignal;
+                 if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+                   fetchSignal = AbortSignal.timeout(5000);
+                 } else {
+                   const controller = new AbortController();
+                   setTimeout(() => controller.abort(), 5000);
+                   fetchSignal = controller.signal;
+                 }
+                 const ncpTokenRes = await fetch('/api/auth/ncp-token', {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'Authorization': `Bearer ${supaSession.access_token}`
+                    },
+                    body: JSON.stringify({ 
+                      ncpDesignerId: fallbackNcpId,
+                      name: supaSession.user.user_metadata?.full_name || '디자이너',
+                      email: supaSession.user.email,
+                      mobileNumber: supaSession.user.user_metadata?.phone || ''
+                    }),
+                    signal: fetchSignal
+                 }).catch(() => null);
+                 if (ncpTokenRes && ncpTokenRes.ok) {
+                    const { token, refreshToken } = await ncpTokenRes.json();
+                    localStorage.setItem('ncp_access_token', token);
+                    if (refreshToken) localStorage.setItem('ncp_refresh_token', refreshToken);
+                    window.dispatchEvent(new Event('ncp_auth_changed'));
+                    return true;
+                 }
+              }
+              
+              // If Supabase session is missing or ncp-token fetch failed, clear the expired NCP token
+              localStorage.removeItem('ncp_access_token');
+              return false; // Fallback to normal Supabase init if any
+            }
+
             const rawId = decoded.id;
             const fullUuid = rawId.includes('-')
               ? rawId
               : `${rawId.substring(0, 8)}-${rawId.substring(8, 12)}-${rawId.substring(12, 16)}-${rawId.substring(16, 20)}-${rawId.substring(20)}`;
             
-            let finalId = fullUuid;
-            if (decoded.email && isMounted.current) {
-              try {
-                const { data: matchedProfile } = await retrySupabaseSelect<any>(() => supabase
-                  .from('profiles')
-                  .select('id')
-                  .eq('email', decoded.email)
-                  .maybeSingle() as any);
-                if (matchedProfile && (matchedProfile as any).id) {
-                  finalId = (matchedProfile as any).id;
-                  console.log("Resolved NCP user email to existing Supabase profile ID:", finalId);
+            const isSystemAdmin = decoded.email === 'cubric.ceo@gmail.com' || localStorage.getItem('ncp_admin') === 'true';
+            if (isSystemAdmin) {
+              console.log("[checkNcpSession] System Admin detected. Bypassing live NCP detail fetch.");
+              const initialUser = {
+                id: fullUuid,
+                email: decoded.email || 'cubric.ceo@gmail.com',
+                user_metadata: {
+                  full_name: decoded.name || '관리자 (System Admin)',
+                  phone: decoded.mobileNumber || ''
                 }
-              } catch (profileLookupErr) {
-                console.warn("Could not lookup profile by email:", profileLookupErr);
-              }
+              };
+              setUser(initialUser as any);
+              setIsAuthInitialized(true);
+              lastVerifiedNcpToken.current = ncpToken;
+              return true;
             }
-
-            if (!isMounted.current) return false;
-
-            let ncpName = decoded.name;
-            let ncpEmail = decoded.email;
-            let ncpPhone = decoded.mobileNumber || '';
-            try {
-              const detailRes = await accountClient.get('/designer/detail');
-              if (detailRes && detailRes.data) {
-                if (detailRes.data.name && detailRes.data.name !== '디자이너' && detailRes.data.name !== '사용자') {
-                  ncpName = detailRes.data.name;
-                }
-                if (detailRes.data.email && !detailRes.data.email.endsWith('@ncp.local')) {
-                  ncpEmail = detailRes.data.email;
-                }
-                if (detailRes.data.mobileNumber || detailRes.data.phone) {
-                  ncpPhone = detailRes.data.mobileNumber || detailRes.data.phone;
-                }
-              }
-            } catch (detailErr) {
-              console.warn("[checkNcpSession] Live NCP detail fetch failed:", detailErr);
-            }
-
-            const synthesizedUser = {
-              id: finalId,
-              email: ncpEmail || `${rawId}@ncp.local`,
+            
+            // Set initial user state synchronously to prevent black screen lock!
+            const initialUser = {
+              id: fullUuid,
+              email: decoded.email || `${rawId}@ncp.local`,
               user_metadata: {
-                full_name: ncpName || '사용자',
-                phone: ncpPhone || ''
+                full_name: decoded.name || '사용자',
+                phone: decoded.mobileNumber || ''
               }
             };
-            setUser(synthesizedUser as any);
+            setUser(initialUser as any);
             setIsAuthInitialized(true);
-            
-            // Non-blocking welcome reward & profile activation check
-            try {
-              await ensureProfileExists(synthesizedUser as any);
-              await checkWelcomeReward(synthesizedUser as any);
-              await checkDailyReward(synthesizedUser as any);
-            } catch (err: any) {
-              console.warn("NCP user silent Supabase profile sync failed:", err.message);
-            }
+
+            // Now, run the heavy async background fetch of details & profile ID
+            (async () => {
+              let finalId = fullUuid;
+              if (decoded.email && isMounted.current) {
+                try {
+                  const { data: matchedProfile } = await retrySupabaseSelect<any>(() => supabase
+                    .from('profiles')
+                    .select('id')
+                    .eq('email', decoded.email)
+                    .maybeSingle() as any);
+                  if (matchedProfile && (matchedProfile as any).id && isMounted.current) {
+                    finalId = (matchedProfile as any).id;
+                    console.log("Resolved NCP user email to existing Supabase profile ID:", finalId);
+                  }
+                } catch (profileLookupErr) {
+                  console.warn("Could not lookup profile by email:", profileLookupErr);
+                }
+              }
+
+              if (!isMounted.current) return;
+
+              let ncpName = decoded.name;
+              let ncpEmail = decoded.email;
+              let ncpPhone = decoded.mobileNumber || '';
+              let ncpAvatarUrl = '';
+              try {
+                const detailRes = await accountClient.get('/designer/detail');
+                if (detailRes && detailRes.data && isMounted.current) {
+                  if (detailRes.data.name && detailRes.data.name !== '디자이너' && detailRes.data.name !== '사용자') {
+                    ncpName = detailRes.data.name;
+                  }
+                  if (detailRes.data.email && !detailRes.data.email.endsWith('@ncp.local')) {
+                    ncpEmail = detailRes.data.email;
+                  }
+                  if (detailRes.data.mobileNumber || detailRes.data.phone) {
+                    ncpPhone = detailRes.data.mobileNumber || detailRes.data.phone;
+                  }
+                  const cands: string[] = [];
+                  const pf = detailRes.data.profile;
+                  if (pf) {
+                    if (pf.thumbNailPath) cands.push(pf.thumbNailPath);
+                    if (pf.fileName) cands.push(pf.fileName);
+                    if (pf.savedFileName) cands.push(pf.savedFileName);
+                    if (pf.savedPath) cands.push(pf.savedPath);
+                    if (pf.path) cands.push(pf.path);
+                    if (pf.id) cands.push(pf.id);
+                    if (pf.fileId) cands.push(pf.fileId);
+                    if (pf.file_id) cands.push(pf.file_id);
+                  }
+                  if (detailRes.data.file_id) cands.push(detailRes.data.file_id);
+                  if (detailRes.data.fileId) cands.push(detailRes.data.fileId);
+                  const directOpts = [detailRes.data.profileImageUrl, detailRes.data.profileImage, detailRes.data.imageUrl, detailRes.data.image, detailRes.data.avatarUrl, detailRes.data.avatar_url];
+                  directOpts.forEach(u => { if (u) cands.push(u); });
+                  if (cands.length > 0) ncpAvatarUrl = Array.from(new Set(cands)).join(',');
+                }
+              } catch (detailErr: any) {
+                console.warn("[checkNcpSession] Live NCP detail fetch failed:", detailErr);
+                const status = detailErr.response?.status;
+                const isWithdrawn = status === 400 || status === 401 || status === 403 || status === 404 || status === 500;
+
+                if (isWithdrawn && isMounted.current) {
+                  console.log("[checkNcpSession] Live NCP account withdrawn or token invalid. Auto logging out...");
+                  localStorage.removeItem('ncp_access_token');
+                  localStorage.removeItem('ncp_refresh_token');
+                  localStorage.removeItem('ncp_admin');
+                  localStorage.clear();
+                  sessionStorage.clear();
+                  supabase.auth.signOut().catch(() => {});
+                  setUser(null);
+                  window.dispatchEvent(new Event('ncp_auth_changed'));
+                  alert('회원 정보가 유효하지 않거나 탈퇴된 계정입니다. 자동으로 로그아웃됩니다.');
+                  window.location.href = window.location.origin + '/?logout=' + Date.now();
+                  return;
+                }
+              }
+
+              if (isMounted.current) {
+                const synthesizedUser = {
+                  id: finalId,
+                  email: ncpEmail || `${rawId}@ncp.local`,
+                  user_metadata: {
+                    full_name: ncpName || '사용자',
+                    phone: ncpPhone || '',
+                    avatar_url: ncpAvatarUrl || ''
+                  }
+                };
+                setUser(synthesizedUser as any);
+                lastVerifiedNcpToken.current = ncpToken;
+
+                // Under user instruction, we bypass all online Supabase profile and metadata sync updates for NCP user sessions.
+                // This shields NCP designer profiles from any Supabase schema changes or validation warnings.
+              }
+            })();
+
             return true;
           }
         } catch (e) {
-          console.warn("NCP session load failed, clearing ncp token.", e);
-          localStorage.removeItem('ncp_access_token');
+          console.warn("NCP session load failed, retaining token as requested.", e);
         }
       }
       return false;
@@ -473,6 +590,7 @@ function AppContent() {
       const params = new URLSearchParams(window.location.search);
       if (params.get('logout')) {
         setUser(null);
+        lastVerifiedNcpToken.current = null;
         setIsAuthInitialized(true);
         try {
           supabase.auth.signOut().catch(() => {});
@@ -493,24 +611,28 @@ function AppContent() {
         setIsAuthInitialized(true);
         
         if (currentUser) {
-          try {
-            await ensureProfileExists(currentUser);
-            await checkWelcomeReward(currentUser);
-            await checkDailyReward(currentUser);
-          } catch (err: any) {
-            console.warn("Supabase user rewards check failed:", err.message);
-          }
+          // Fire and forget rewards and profile creation so it doesn't block the UI
+          (async () => {
+            try {
+              await ensureProfileExists(currentUser);
+              await checkWelcomeReward(currentUser);
+              await checkDailyReward(currentUser);
+            } catch (err: any) {
+              console.warn("Supabase user rewards check failed:", err.message);
+            }
+          })();
         }
       }
     };
 
-    initAuth();
+    initAuth().catch(e => console.error(e)).finally(() => setIsAuthInitialized(true));
 
     // Setup Supabase change listener as fallback/sync
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       const params = new URLSearchParams(window.location.search);
       if (params.get('logout')) {
         setUser(null);
+        lastVerifiedNcpToken.current = null;
         return;
       }
 
@@ -551,6 +673,7 @@ function AppContent() {
     supabaseSub = subscription;
 
     const handleNcpAuthChanged = () => {
+      lastVerifiedNcpToken.current = null;
       initAuth();
     };
     window.addEventListener('ncp_auth_changed', handleNcpAuthChanged);
@@ -614,7 +737,12 @@ function AppContent() {
       if (event.origin !== window.location.origin) return;
 
       if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
-        const { session } = event.data;
+        const { session, ncpToken } = event.data;
+        if (ncpToken) {
+          localStorage.setItem('ncp_access_token', ncpToken.token);
+          if (ncpToken.refreshToken) localStorage.setItem('ncp_refresh_token', ncpToken.refreshToken);
+          window.dispatchEvent(new Event('ncp_auth_changed'));
+        }
         if (session) {
           console.log("Supabase OAuth session received from popup!", session);
           try {
@@ -654,7 +782,14 @@ function AppContent() {
 
   const isSystemAdmin = (user?.email === 'cubric.ceo@gmail.com') || localStorage.getItem('ncp_admin') === 'true';
   
-  if (settings?.parkingPage?.enabled && !isSystemAdmin && location.pathname !== '/admin/login') {
+  // AI Studio 개발환경(로컬 및 프리뷰)에서는 파킹 페이지 활성화 설정을 임시 우회(비활성화)합니다.
+  const isAiStudio = typeof window !== 'undefined' && (
+    window.location.hostname.includes('ais-dev') || 
+    window.location.hostname.includes('ais-pre') || 
+    window.location.hostname.includes('localhost')
+  );
+  
+  if (settings?.parkingPage?.enabled && !isSystemAdmin && location.pathname !== '/admin/login' && !isAiStudio) {
     return <ParkingPage />;
   }
 
@@ -676,9 +811,11 @@ function AppContent() {
         <Route path="/ai-hair-model" element={<AiHairModelPage user={user} />} />
         <Route path="/ai-hair-model_app" element={<AiHairModelAppPage user={user} />} />
         <Route path="/admin" element={<AdminPage user={user} />} />
+        <Route path="/admin/test" element={<TestPage />} />
         <Route path="/admin/login" element={<AdminLoginPage />} />
         <Route path="/admin/site-editor" element={<SiteEditorPage user={user} />} />
         <Route path="/admin/shop" element={<ShopManagementPage user={user} />} />
+        <Route path="/admin/store" element={<StoreManagementPage user={user} />} />
         <Route path="/security-admin" element={<SecurityAdminPage user={user} />} />
         <Route path="/cs-admin" element={<CsAdminPage user={user} />} />
         <Route path="/support" element={<SupportPage user={user} />} />

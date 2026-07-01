@@ -3763,6 +3763,20 @@ ${currentHtml}`;
 
             {activeTab === "parking" && (
               <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                {typeof window !== 'undefined' && (window.location.hostname.includes('ais-dev') || window.location.hostname.includes('ais-pre') || window.location.hostname.includes('localhost')) && (
+                  <div className="p-4 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl text-sm flex flex-col gap-1.5 shadow-sm">
+                    <span className="font-bold flex items-center gap-1.5 text-amber-900">
+                      <AlertTriangle className="w-4 h-4 text-amber-600" /> AI Studio 개발 및 프리뷰 환경 안내
+                    </span>
+                    <p className="leading-relaxed">
+                      현재 보시는 화면은 **AI Studio 프로젝트** 환경입니다. 실배포 사이트와의 DB 연동 충돌로 인한 불편을 방지하고자, 이 개발 환경 한정으로 **파킹 페이지 기능이 임시 비활성화(강제 우회)** 상태입니다. 
+                    </p>
+                    <p className="text-xs opacity-90 mt-0.5">
+                      * 실제 운영 상의 Supabase DB 설정 값({draft.parkingPage?.enabled ? '현재 활성화 상태' : '현재 비활성화 상태'})은 그대로 유지・관리되며, 이 페이지에서 켜고 끄실 수 있습니다.
+                    </p>
+                  </div>
+                )}
+
                 <div className="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm">
                   <h3 className="text-lg font-bold text-gray-900 mb-6 flex items-center gap-2 border-b pb-2">
                     <AlertTriangle className="w-5 h-5 text-brand-primary" /> 파킹 페이지 (공사중) 설정

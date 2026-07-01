@@ -4,7 +4,7 @@ import { Coins, Plus, Minus, History, ArrowRight, CheckCircle2 } from 'lucide-re
 import { supabase } from '../../supabase';
 import { apiClient, accountClient } from '../../lib/ncpClient';
 import { useSiteContext } from '../../context/SiteContext';
-import { retryPromise, retrySupabaseSelect, safeSelectWithOrderFallback } from '../../lib/supabase-utils';
+import { retryPromise, retrySupabaseSelect, safeSelectWithOrderFallback, safeJwtDecode } from '../../lib/supabase-utils';
 
 interface CreditsPageProps {
   user?: any;
@@ -47,14 +47,14 @@ const CreditsPage: React.FC<CreditsPageProps> = ({ user }) => {
       if (ncpToken) {
         isNcp = true;
         try {
-          const payloadPart = ncpToken.split('.')[1];
-          const decodedStr = decodeURIComponent(escape(atob(payloadPart)));
-          const decoded = JSON.parse(decodedStr);
-          ncpDesignerId = decoded.id;
-          if (!userId) {
-            userId = decoded.id;
-            if (userId && !userId.includes('-')) {
-               userId = `${userId.substring(0, 8)}-${userId.substring(8, 12)}-${userId.substring(12, 16)}-${userId.substring(16, 20)}-${userId.substring(20)}`;
+          const decoded = safeJwtDecode(ncpToken);
+          if (decoded) {
+            ncpDesignerId = decoded.id;
+            if (!userId) {
+              userId = decoded.id;
+              if (userId && !userId.includes('-')) {
+                 userId = `${userId.substring(0, 8)}-${userId.substring(8, 12)}-${userId.substring(12, 16)}-${userId.substring(16, 20)}-${userId.substring(20)}`;
+              }
             }
           }
         } catch (e) {
@@ -333,6 +333,14 @@ const CreditsPage: React.FC<CreditsPageProps> = ({ user }) => {
 
   useEffect(() => {
     isMounted.current = true;
+    
+    const safetyTimeoutId = setTimeout(() => {
+      if (isMounted.current) {
+        console.warn("[Credits] Credit loading took too long, enforcing safety spinner dropdown.");
+        setLoading(false);
+      }
+    }, 3500);
+
     fetchCreditData();
 
     // Set up Realtime subscription for real-time updates when admin adjusts credits
@@ -345,12 +353,12 @@ const CreditsPage: React.FC<CreditsPageProps> = ({ user }) => {
         const ncpToken = localStorage.getItem('ncp_access_token');
         if (ncpToken) {
           try {
-            const payloadPart = ncpToken.split('.')[1];
-            const decodedStr = decodeURIComponent(escape(atob(payloadPart)));
-            const decoded = JSON.parse(decodedStr);
-            userId = decoded.id;
-            if (userId && !userId.includes('-')) {
-               userId = `${userId.substring(0, 8)}-${userId.substring(8, 12)}-${userId.substring(12, 16)}-${userId.substring(16, 20)}-${userId.substring(20)}`;
+            const decoded = safeJwtDecode(ncpToken);
+            if (decoded) {
+              userId = decoded.id;
+              if (userId && !userId.includes('-')) {
+                 userId = `${userId.substring(0, 8)}-${userId.substring(8, 12)}-${userId.substring(12, 16)}-${userId.substring(16, 20)}-${userId.substring(20)}`;
+              }
             }
           } catch (e) {
             console.warn("NCP Parse error in setupSubscriptions", e);
@@ -403,6 +411,7 @@ const CreditsPage: React.FC<CreditsPageProps> = ({ user }) => {
 
     return () => {
       isMounted.current = false;
+      clearTimeout(safetyTimeoutId);
       if (profileSub) supabase.removeChannel(profileSub);
       if (txSub) supabase.removeChannel(txSub);
     };

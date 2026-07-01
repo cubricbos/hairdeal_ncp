@@ -5,6 +5,7 @@ import { User } from '@supabase/supabase-js';
 import { useNavigate } from 'react-router-dom';
 import { useSiteContext } from '../context/SiteContext';
 import { supabase } from '../supabase';
+import { AvatarImage } from './AvatarImage';
 
 const DEFAULT_MODEL_PRESETS = {
   female: [
@@ -21,6 +22,28 @@ export default function AiMarketingDemo({ user }: { user?: User | null; key?: Re
   const navigate = useNavigate();
   const { settings } = useSiteContext();
   const aiDemo = settings.aiDemo;
+
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handleProfileUpdate = () => {
+      const tempBlob = localStorage.getItem('temp_profile_blob');
+      if (tempBlob) {
+        setAvatarUrl(tempBlob);
+      }
+    };
+    handleProfileUpdate();
+    window.addEventListener('profile_updated', handleProfileUpdate);
+    return () => {
+      window.removeEventListener('profile_updated', handleProfileUpdate);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (user?.user_metadata?.avatar_url && !avatarUrl) {
+      setAvatarUrl(user.user_metadata.avatar_url);
+    }
+  }, [user]);
 
   // AI Hair Model Logic States
   const [modelPresets, setModelPresets] = useState<{ female: any[], male: any[] }>(DEFAULT_MODEL_PRESETS);
@@ -395,7 +418,7 @@ export default function AiMarketingDemo({ user }: { user?: User | null; key?: Re
                   <div className="flex-1 bg-white relative overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] scroll-smooth" ref={feedContainerRef}>
                        <div className="px-3 py-3 flex items-center gap-2.5">
                           <div className="w-9 h-9 rounded-full bg-gray-100 overflow-hidden border border-gray-100">
-                             <img src={user?.user_metadata?.avatar_url || "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=100&q=80"} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                             <AvatarImage url={avatarUrl || user?.user_metadata?.avatar_url} className="w-full h-full object-cover" />
                           </div>
                           <div className="flex flex-col">
                              <span className="text-xs font-[800]">{user?.user_metadata?.full_name || '원장님'}</span>

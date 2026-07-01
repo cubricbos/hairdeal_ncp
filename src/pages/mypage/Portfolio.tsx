@@ -1,22 +1,71 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
-import { Image, Share } from 'lucide-react';
+import { Image, Share, Wifi, Battery, ArrowLeft, Home, Camera, Instagram } from 'lucide-react';
 import { supabase } from '../../supabase';
 import { useNavigate } from 'react-router-dom';
 import AiPortfolioGrid from '../../components/AiPortfolioGrid';
+import { safeJwtDecode } from '../../lib/supabase-utils';
 
 export default function PortfolioPage() {
   const navigate = useNavigate();
   const [user, setUser] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const isMounted = useRef(true);
+
+  useEffect(() => {
+    isMounted.current = true;
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     const fetchUser = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.user) {
-        navigate('/');
-        return;
+      try {
+        const ncpToken = localStorage.getItem('ncp_access_token');
+        if (ncpToken) {
+          try {
+            const decoded = safeJwtDecode(ncpToken);
+            if (decoded && isMounted.current) {
+              const rawId = decoded.id || '';
+              const fullUuid = rawId.includes('-')
+                ? rawId
+                : `${rawId.substring(0, 8)}-${rawId.substring(8, 12)}-${rawId.substring(12, 16)}-${rawId.substring(16, 20)}-${rawId.substring(20)}`;
+              setUser({
+                id: fullUuid,
+                email: decoded.email || `${decoded.id}@ncp.local`,
+                user_metadata: {
+                  full_name: decoded.name || '디자이너',
+                  avatar_url: decoded.profileImageUrl || ''
+                }
+              });
+              setLoading(false);
+              return;
+            }
+          } catch (jwtErr) {
+            console.warn("Failed decoding NCP token on portfolio page:", jwtErr);
+          }
+        }
+
+        // Supabase login fallback
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          if (isMounted.current) {
+            setUser(session.user);
+          }
+        } else {
+          if (isMounted.current) {
+            navigate('/');
+          }
+        }
+      } catch (err) {
+        console.error("Auth check failed in PortfolioPage:", err);
+        if (isMounted.current) navigate('/');
+      } finally {
+        if (isMounted.current) {
+          setLoading(false);
+        }
       }
-      setUser(session.user);
     };
     fetchUser();
   }, [navigate]);
@@ -62,33 +111,43 @@ export default function PortfolioPage() {
       }
   };
 
-  if (!user) return <div className="min-h-screen bg-bg-base/50 flex justify-center pt-32">Loading...</div>;
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-bg-base/50 flex flex-col items-center justify-center pt-32">
+        <div className="w-10 h-10 border-4 border-brand-primary/20 border-t-brand-primary rounded-full animate-spin mb-4" />
+        <p className="text-gray-500 font-bold text-sm">포트폴리오 스튜디오 동기화 중...</p>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-bg-base/50 flex flex-col items-center justify-center pt-32">
+        <p className="text-gray-500 font-bold text-sm mb-4">로그인이 필요합니다.</p>
+        <button onClick={() => navigate('/')} className="bg-brand-primary text-white font-bold px-6 py-2.5 rounded-xl">
+          홈으로 이동
+        </button>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-bg-base pt-24 pb-20 px-4">
-      <div className="max-w-4xl mx-auto">
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="bg-white rounded-3xl shadow-xl shadow-brand-primary/5 border border-indigo-50/50 overflow-hidden"
-        >
-          {/* Header */}
-          <div className="p-8 border-b border-gray-100 bg-gradient-to-br from-indigo-50/50 to-white flex items-center gap-4">
-            <div className="w-12 h-12 bg-indigo-100 rounded-2xl flex items-center justify-center text-brand-primary shadow-inner">
-              <Image className="w-6 h-6" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-black text-gray-900 tracking-tight">마이 포트폴리오</h1>
-              <p className="text-gray-500 font-medium mt-1">내가 생성한 AI 헤어모델을 확인하고 외부로 공유할 수 있습니다.</p>
-            </div>
-          </div>
+    <div className="min-h-screen bg-bg-base pt-24 pb-20 px-4 flex flex-col items-center">
+      <div className="max-w-3xl w-full mx-auto flex flex-col">
+        <div className="flex items-center gap-2 mb-6">
+          <button 
+            onClick={() => navigate('/')} 
+            className="text-gray-500 hover:text-gray-900 transition-colors flex items-center justify-center p-2 rounded-full hover:bg-gray-100"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+          <h1 className="text-2xl font-black text-gray-900 tracking-tight">시술 포트폴리오</h1>
+        </div>
 
-          <div className="p-8 pb-32">
-             <div className="max-w-md mx-auto border border-gray-200 rounded-[2rem] overflow-hidden shadow-lg h-[800px] flex flex-col bg-white">
-                <AiPortfolioGrid user={user} onBack={() => {}} onShare={handleShare} />
-             </div>
-          </div>
-        </motion.div>
+        {/* Interactive Grid Area */}
+        <div className="w-full bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden flex flex-col min-h-[600px]">
+          <AiPortfolioGrid user={user} onBack={() => navigate('/')} onShare={handleShare} />
+        </div>
       </div>
     </div>
   );

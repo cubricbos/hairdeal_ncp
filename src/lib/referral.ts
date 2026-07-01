@@ -41,7 +41,9 @@ export async function checkAndRewardReferralActivity(userId: string) {
       }]);
       // Optional: dispatch event if the referrer happens to be logged in the same browser, but generally they are not.
     }
-  } catch (err) {
-    console.error("Referral activity check failed:", err);
+  } catch (err: any) {
+    if (err?.message !== "Failed to fetch" && !err?.message?.includes("406")) {
+      console.warn("Referral activity check skipped or failed:", err.message);
+    }
   }
 }

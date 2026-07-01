@@ -74,3 +74,42 @@ export async function safeSelectWithOrderFallback<T>(
   
   return result;
 }
+
+/**
+ * Decodes local storage JWT tokens safely handling url-safe chars and padding mismatch.
+ */
+export function safeJwtDecode(token: string | null): any {
+  if (!token) return null;
+  try {
+    const parts = token.split('.');
+    if (parts.length < 2) return null;
+    const payloadPart = parts[1];
+    
+    // Replace URL-safe base64 characters
+    let base64 = payloadPart.replace(/-/g, '+').replace(/_/g, '/');
+    
+    // Pad with '=' if length is not a multiple of 4
+    const pad = base64.length % 4;
+    if (pad) {
+      base64 += '='.repeat(4 - pad);
+    }
+    
+    const decodedStr = decodeURIComponent(
+      atob(base64)
+        .split('')
+        .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .join('')
+    );
+    return JSON.parse(decodedStr);
+  } catch (e) {
+    console.warn("[safeJwtDecode] Failed to decode JWT safely:", e);
+    // Ultimate fallback if base64 throws
+    try {
+      const parts = token.split('.');
+      if (parts[1]) {
+        return JSON.parse(window.atob(parts[1]));
+      }
+    } catch (_) {}
+    return null;
+  }
+}

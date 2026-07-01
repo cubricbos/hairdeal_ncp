@@ -3,6 +3,7 @@ import { supabase } from '../../supabase';
 import { User } from '@supabase/supabase-js';
 import { Copy, CheckCircle2, UserPlus, Image as ImageIcon, Gift, Check } from 'lucide-react';
 import { motion } from 'motion/react';
+import { accountClient } from '../../lib/ncpClient';
 
 interface ReferralPageProps {
   user: User | null;
@@ -35,8 +36,7 @@ export default function ReferralPage({ user }: ReferralPageProps) {
 
   const fetchData = async () => {
     try {
-      setLoading(true);
-      const deterministicCode = user ? btoa(user.id.replace(/-/g, '')).substring(0, 8).toUpperCase() : '';
+      setLoading(true); 
 
       // Fetch profile for referral code
       let currentProfileData = null;
@@ -60,32 +60,41 @@ export default function ReferralPage({ user }: ReferralPageProps) {
 
         currentProfileData = profileData;
 
-        if (user && profileData && !profileData.referral_code) {
-          const { data: updatedProfile } = await supabase
-            .from('profiles')
-            .update({ referral_code: deterministicCode })
-            .eq('id', profileData.id)
-            .select()
-            .maybeSingle();
-          if (updatedProfile) {
-            currentProfileData = updatedProfile;
-          }
-        }
       } catch (dbErr) {
         console.warn("Database lookup failed during referral fetch, using local synthetic fallback:", dbErr);
       }
       
-      if (!currentProfileData && user) {
-        currentProfileData = {
-          id: user.id,
-          email: user.email || 'user@example.com',
-          full_name: user.user_metadata?.full_name || '원장님',
-          referral_code: deterministicCode,
-          credits: 0
-        };
-      }
+        if (!currentProfileData && user) {
+          currentProfileData = {
+            id: user.id,
+            email: user.email || 'user@example.com',
+            full_name: user.user_metadata?.full_name || '원장님',
+            referral_code: null,
+            credits: 0
+          };
+        }
 
-      setProfile(currentProfileData);
+        // --- FETCH FROM NCP AS A FALLBACK/OVERRIDE ---
+        if (localStorage.getItem('ncp_access_token')) {
+          try {
+            const { data: ncpDetail } = await accountClient.get('/designer/detail');
+            if (ncpDetail && (ncpDetail.referralCode || ncpDetail.referral_code)) {
+              const liveCode = ncpDetail.referralCode || ncpDetail.referral_code;
+              // Override referral code with live NCP value 
+              if (currentProfileData) {
+                currentProfileData.referral_code = liveCode;
+              }
+              // Optional: background sync to Supabase if it wasn't there
+              if (currentProfileData && currentProfileData.id) {
+                supabase.from('profiles').update({ referral_code: liveCode }).eq('id', currentProfileData.id).then();
+              }
+            }
+          } catch (ncpErr) {
+            console.warn("NCP Detail fetch failed during Referral fetch", ncpErr);
+          }
+        }
+
+        setProfile(currentProfileData);
 
       // Fetch missions
       try {

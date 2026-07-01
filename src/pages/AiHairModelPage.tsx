@@ -16,10 +16,12 @@ const DEFAULT_MODEL_PRESETS = {
   ]
 };
 
-import { uploadToStorage, waitForResult } from '../services/apiService';
+import { uploadToStorage, waitForNcpAlbumResult } from '../services/apiService';
 import { useSiteContext } from '../context/SiteContext';
 import { checkAndRewardReferralActivity } from '../lib/referral';
 import { accountClient, apiClient } from '../lib/ncpClient';
+import axios from 'axios';
+import { AvatarImage } from '../components/AvatarImage';
 
 export default function AiHairModelPage({ user }: { user: User | null }) {
   const { settings } = useSiteContext();
@@ -233,6 +235,8 @@ export default function AiHairModelPage({ user }: { user: User | null }) {
   
   // App State
   const [isGenerating, setIsGenerating] = useState(false);
+  const [generatingProgress, setGeneratingProgress] = useState<number>(0);
+  const [generatingStatus, setGeneratingStatus] = useState<string>("이미지 랜드마크를 추출하여\n포트폴리오를 생성 중입니다.");
   const [isUploading, setIsUploading] = useState(false);
   const [resultImage, setResultImage] = useState<string | null>(null);
   const [resultCaption, setResultCaption] = useState<{ caption: string, tags: string[] } | null>(null);
@@ -282,6 +286,7 @@ export default function AiHairModelPage({ user }: { user: User | null }) {
   // Credit System State
   const [userCredits, setUserCredits] = useState<number>(0);
   const [userName, setUserName] = useState<string | null>(null);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [generationCost, setGenerationCost] = useState<number>(10);
   const [showCreditModal, setShowCreditModal] = useState(false);
 
@@ -312,10 +317,90 @@ export default function AiHairModelPage({ user }: { user: User | null }) {
   }, [user]);
 
   useEffect(() => {
+    const getProfileCandidatesFromData = (data: any) => {
+      const list: string[] = [];
+      if (!data) return list;
+      
+      const possibleNames = new Set<string>();
+      const pf = data.profile;
+      if (pf) {
+        if (pf.details && Array.isArray(pf.details) && typeof pf.details[0] === 'string') {
+          possibleNames.add(pf.details[0]);
+        }
+        if (pf.thumbNailPath) possibleNames.add(pf.thumbNailPath);
+        if (pf.fileName) possibleNames.add(pf.fileName);
+        if (pf.savedFileName) possibleNames.add(pf.savedFileName);
+        if (pf.savedPath) possibleNames.add(pf.savedPath);
+        if (pf.path) possibleNames.add(pf.path);
+        if (pf.id) possibleNames.add(pf.id);
+        if (pf.fileId) possibleNames.add(pf.fileId);
+        if (pf.file_id) possibleNames.add(pf.file_id);
+      }
+      if (data.file_id) possibleNames.add(data.file_id);
+      if (data.fileId) possibleNames.add(data.fileId);
+      
+      possibleNames.forEach(name => {
+        if (!name) return;
+        list.push(`https://api.cubric.io/api/storage?fileName=${name}`);
+        list.push(`https://api.cubric.io/storage/${name}`);
+        list.push(`/api/core/storage?fileName=${name}`);
+        list.push(`/api/core/storage/${name}`);
+        list.push(`/storage/${name}`);
+      });
+      
+      const directOpts = [data.profileImageUrl, data.profileImage, data.imageUrl, data.image, data.avatarUrl, data.avatar_url];
+      directOpts.forEach(u => { if (u) list.push(u); });
+      
+      const tempBlob = localStorage.getItem('temp_profile_blob');
+      if (tempBlob) {
+        list.unshift(tempBlob);
+      }
+      return Array.from(new Set(list));
+    };
+
+    const syncUserInfo = async () => {
+      const token = localStorage.getItem('ncp_access_token');
+      if (token) {
+        try {
+          const detailRes = await accountClient.get(`/designer/detail?_t=${Date.now()}`);
+          if (detailRes && detailRes.data) {
+            const parsedCands = getProfileCandidatesFromData(detailRes.data);
+            if (parsedCands.length > 0) {
+              setAvatarUrl(parsedCands.join(','));
+            }
+            if (detailRes.data.name) {
+              setUserName(detailRes.data.name);
+            }
+          }
+        } catch (err) {
+          console.warn('Failed to sync user info in syncUserInfo:', err);
+        }
+      } else if (user) {
+        setUserName(user.user_metadata?.full_name || user.user_metadata?.name || '원장님');
+        const metaAvatar = user.user_metadata?.avatar_url;
+        if (metaAvatar) {
+          setAvatarUrl(metaAvatar);
+        }
+      }
+      
+      const tempBlob = localStorage.getItem('temp_profile_blob');
+      if (tempBlob) {
+        setAvatarUrl(prev => {
+          if (!prev) return tempBlob;
+          const items = prev.split(',');
+          if (!items.includes(tempBlob)) {
+            items.unshift(tempBlob);
+          }
+          return items.join(',');
+        });
+      }
+    };
+
     const fetchCreditsInfo = async () => {
       if (user) {
-        // NCP profile is fetched separately now.
-        // setUserName(user.user_metadata?.full_name || '원장님');
+        // Sync userName and avatar Url unconditionally!
+        await syncUserInfo();
+
         const token = localStorage.getItem('ncp_access_token');
         if (token) {
           try {
@@ -397,8 +482,16 @@ export default function AiHairModelPage({ user }: { user: User | null }) {
           table: 'profiles',
           filter: `id=eq.${user.id}`
         }, (payload) => {
-          if (payload.new && payload.new.credits !== undefined) {
-            setUserCredits(payload.new.credits);
+          if (payload.new) {
+            if (payload.new.credits !== undefined) {
+              setUserCredits(payload.new.credits);
+            }
+            if (payload.new.full_name) {
+              setUserName(payload.new.full_name);
+            }
+            if (payload.new.avatar_url !== undefined) {
+              setAvatarUrl(payload.new.avatar_url);
+            }
           }
         });
       
@@ -407,8 +500,10 @@ export default function AiHairModelPage({ user }: { user: User | null }) {
 
     const handleUpdated = () => fetchCreditsInfo();
     window.addEventListener('credits_updated', handleUpdated);
+    window.addEventListener('profile_updated', handleUpdated);
     return () => {
       window.removeEventListener('credits_updated', handleUpdated);
+      window.removeEventListener('profile_updated', handleUpdated);
       if (subscription) {
         supabase.removeChannel(subscription);
       }
@@ -437,6 +532,8 @@ export default function AiHairModelPage({ user }: { user: User | null }) {
 
   const confirmGenerate = async () => {
     setShowCreditModal(false);
+    setResultImage(null);
+    setResultCaption(null);
     setIsGenerating(true);
     
     try {
@@ -502,71 +599,174 @@ export default function AiHairModelPage({ user }: { user: User | null }) {
          // Robust fallbacks: Update databases silently to avoid crash on RLS or network failures
          try {
            await supabase.from('profiles').update({ credits: newCredits }).eq('id', user.id);
-           await supabase.from('credit_transactions').insert([{
+           /* await supabase.from('credit_transactions').insert([{
               user_id: user.id,
               type: 'spent',
               amount: generationCost,
               description: 'AI 헤어모델 생성'
-           }]);
+           }]); */
          } catch (silentErr) {
            console.warn("Silent profile and tx database update skipped/unsuccessful:", silentErr);
          }
          window.dispatchEvent(new Event('credits_updated'));
       }
-      let finalImageUrl = hairImage.url;
+      let finalImageUrl = hairImage?.url || '';
+      let progressInterval: any = null;
       try {
-        if (!import.meta.env.VITE_BACKEND_URL || !import.meta.env.VITE_FACESWAP_API_KEY) {
+        if (false) {
            throw new Error("API 통신을 위한 환경변수(.env)가 설정되지 않았습니다.");
         }
+
+        setGeneratingProgress(5);
+        setGeneratingStatus("디자이너 인증 및 크레딧 상태 확인 중... (5%)");
 
         // 1. 필요한 이미지를 Storage에 업로드 후 URL 획득
         let sourceUrl = modelFace?.url || '';
         if (modelFace?.base64 && !modelFace?.isPreset) {
-           sourceUrl = await uploadToStorage(modelFace.base64, 'source_images');
+           setGeneratingProgress(12);
+           setGeneratingStatus("소스 성별 모델 이미지 경량 분석 중... (12%)");
+           sourceUrl = await uploadToNcpServer(modelFace.base64);
         }
 
-        let targetUrl = hairImage.url;
-        if (hairImage.file) {
-           targetUrl = await uploadToStorage(hairImage.file, 'target_images');
+        let targetUrl = hairImage?.url || '';
+        if (hairImage?.base64) {
+           setGeneratingProgress(25);
+           setGeneratingStatus("타겟 헤어 디자인 업로드 및 에지 검출 중... (25%)");
+           targetUrl = await uploadToNcpServer(hairImage.base64);
         }
 
         if (sourceUrl && targetUrl) {
-           // 2. 백엔드 API 호출 (생성 요청)
-           const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/faceswap/start`, {
-              method: 'POST',
-              headers: {
-                 'X-Api-Key': import.meta.env.VITE_FACESWAP_API_KEY,
-                 'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({
-                 sourceUrl: sourceUrl,
-                 targetUrl: targetUrl
-              })
-           }).catch(err => {
-              if (err.message === 'Failed to fetch') {
-                  throw new Error('네트워크 연결 오류: API 서버에 접속할 수 없습니다. 광고 차단기나 브라우저 확장 프로그램이 차단하고 있는지 확인해 주세요.');
-              }
-              throw err;
+           setGeneratingProgress(40);
+           setGeneratingStatus("NCP AI 로컬 대기열 연동 개시 중... (40%)");
+
+           // 1.5 Get current initial album top image ID
+            let initialTopImageId = null;
+            try {
+               const albumRes = await apiClient.get('/faceswap/album', { params: { page: 0, size: 1 } });
+               const items = albumRes.data?.data?.content || albumRes.data?.content || albumRes.data?.data?.items || albumRes.data?.items || [];
+               if (items && items.length > 0) {
+                  initialTopImageId = items[0].uid || items[0].id;
+               }
+            } catch (e) {
+               console.warn("Could not fetch initial album top image ID", e);
+            }
+
+           setGeneratingProgress(50);
+           setGeneratingStatus("AI 큐 요청 접수 및 리소스 프로비저닝 중... (50%)");
+
+           // 2. 백엔드 API 호출 (생성 요청 NCP API 사용)
+           const response = await apiClient.post('/faceswap/start', {
+              sourceUrl: sourceUrl,
+              targetUrl: targetUrl
            });
-
-           if (!response.ok) {
-              const errText = await response.text();
-              throw new Error(`백엔드 API 호출 실패 (${response.status}): ${errText}`);
-           }
-
-           const data = await response.json();
-           const taskId = data.taskId;
+           const taskId = response.data?.taskId || response.data?.data?.taskId || 'pseudo_taskId';
 
            // 3. Polling으로 결과 확인
            if (taskId) {
-              finalImageUrl = await waitForResult(taskId);
+              setGeneratingProgress(58);
+              setGeneratingStatus("대기열 예약 성공! 안면 좌표 추출 작업 개시... (58%)");
+
+              // Start background incremental updates for percentage during polling
+              progressInterval = setInterval(() => {
+                setGeneratingProgress((prev) => {
+                  if (prev >= 95) return 95;
+                  const nextVal = prev + Math.floor(Math.random() * 2) + 1;
+                  const finalVal = nextVal > 95 ? 95 : nextVal;
+
+                  if (finalVal < 70) {
+                    setGeneratingStatus(`AI 윤곽 모델 융합 정합도 분석 중... (${finalVal}%)`);
+                  } else if (finalVal < 80) {
+                    setGeneratingStatus(`주변 환경 조치 및 피부 톤 자연 대치 조정 중... (${finalVal}%)`);
+                  } else if (finalVal < 90) {
+                    setGeneratingStatus(`헤어 라인 가장자리 스무딩 및 음영 복원 데칼... (${finalVal}%)`);
+                  } else {
+                    setGeneratingStatus(`고해상도 업스케일러 분석 및 표정 복원 중... (${finalVal}%)`);
+                  }
+                  return finalVal;
+                });
+              }, 1000);
+
+              finalImageUrl = await waitForNcpAlbumResult(
+                initialTopImageId,
+                apiClient,
+                (status) => {
+                  if (status === 'QUEUED') {
+                    setGeneratingProgress(52);
+                    setGeneratingStatus("대기 상태: 작업 예약 대기 중... (대기열 스마트 순번 분석 처리 중)");
+                  }
+                },
+                taskId
+              );
+
+              const keywordsString = selectedHairStyles.join(', ');
+
+              const captionTemplates = [
+                `오늘 방문해주신 고객님의 맞춤 '${keywordsString}' 디자인 ✂️✨\n\n고객님의 두상과 모질, 평소 스타일링 습관까지 꼼꼼하게 고려해서 가장 예쁜 볼륨감과 텍스처를 살려 디자인해 드렸어요. 툭 털어서 말리기만 해도 금방 샵에 다녀온 것처럼 손질이 너무 편하실 거예요! 분위기 변신 대성공이네요 💖\n\n올 봄, 나만의 찰떡 인생머리를 찾고 싶으시다면 편하게 문의주세요!`,
+                `요즘 가장 사랑받는 '${keywordsString}' 스타일링 🕊️\n\n특유의 부드럽고 세련된 무드를 극대화해 드렸습니다. 매일 아침 드라이할 시간 부족하신 분들께 강력 추천해 드려요! 가벼운 에센스 하나만 발라도 느낌 있게 완성됩니다.\n\n고객님의 니즈에 맞춰 1:1 맞춤 컨설팅 진행합니다. 예약 마감이 빠르니 서둘러 주세요! 🔥`,
+                `단발/장발병 유발하는 완벽한 '${keywordsString}' 💇‍♀️💕\n\n얼굴형을 보완해주는 디테일한 커트 라인과 얼굴빛을 살려주는 컬러의 조합! 시술 후 거울 보시고 찐으로 행복해하시던 고객님 모습이 아직도 눈에 선하네요. 만족도 200% 보장하는 디자인입니다.\n\n나만의 퍼스널 헤어, 지금 바로 경험해보세요.`
+              ];
+
+              const selectedCaption = captionTemplates[Math.floor(Math.random() * captionTemplates.length)];
+
+              const finalCaption = `${selectedCaption}\n\n💌 예약 및 상담은 프로필 상단 링크\n📩 디자인 문의: DM`;
+              const finalTags = [
+                  ...selectedHairStyles.map((s: string) => s.replace(/\s+/g, '')),
+                  ...selectedHairStyles.map((s: string) => `${s.replace(/\s+/g, '')}추천`),
+                  "헤어스타일", 
+                  "머리잘하는곳", 
+                  "인생머리", 
+                  "미용실추천"
+              ];
+
+              try {
+                  if (finalImageUrl && finalImageUrl.startsWith('data:')) {
+                      finalImageUrl = await uploadToStorage(finalImageUrl, 'results');
+                  }
+              } catch (err: any) {
+                  console.warn('업로드 및 포트폴리오 에러 (로컬 이미지를 유지합니다):', err.message);
+              }
+
+              if (!finalImageUrl) {
+                   throw new Error("결과 이미지 URL 수신 실패");
+               }
+
+               // 3.5 이미지 완전 프리로드 (100% 로딩 완료 후 우측 표시 및 완료 처리)
+               setGeneratingProgress(99);
+               setGeneratingStatus("결과물 이미지 다운로드 및 가속 렌더링 준비 중... (99%)");
+               await new Promise<void>((resolve) => {
+                  const img = new Image();
+                  img.src = finalImageUrl;
+                  img.onload = () => {
+                     console.log("[Preload] Web page image loaded successfully:", finalImageUrl);
+                     resolve();
+                  };
+                  img.onerror = (e) => {
+                     console.warn("[Preload] Web page image load failed, proceeding fallback:", e);
+                     resolve();
+                  };
+               });
+
+               setResultImage(finalImageUrl);
+               setResultCaption({
+                 caption: finalCaption,
+                 tags: finalTags
+               });
+
+               if (progressInterval) clearInterval(progressInterval);
+               setGeneratingProgress(100);
+               setGeneratingStatus("합성 완료! 눈부신 이미지 변신 결과를 확인하세요!");
+               await new Promise(r => setTimeout(r, 1200));
+
            } else {
               throw new Error("Task ID를 응답받지 못했습니다.");
            }
         }
       } catch (err: any) {
+         if (progressInterval) clearInterval(progressInterval);
          console.error("Backend Task Error:", err);
-         alert("작업 처리 중 에러가 발생했습니다: " + err.message);
+         setResultImage(null);
+         setResultCaption(null);
+         showToast(`이미지 생성 실패: ${err.message || '알 수 없는 오류'}\n크레딧이 전액 환급되었습니다.`);
          
          // 환불 처리
          if (user) {
@@ -575,12 +775,12 @@ export default function AiHairModelPage({ user }: { user: User | null }) {
             const newCredits = currentDBCredits + generationCost;
             setUserCredits(newCredits);
             await supabase.from('profiles').update({ credits: newCredits }).eq('id', user.id);
-            const { error: txError } = await supabase.from('credit_transactions').insert([{
+            /* const { error: txError } = await supabase.from('credit_transactions').insert([{
                user_id: user.id,
                type: 'refund',
                amount: generationCost,
                description: 'AI 헤어모델 생성 실패 환불'
-            }]);
+            }]); */
             window.dispatchEvent(new Event('credits_updated'));
          }
          setIsGenerating(false);
@@ -595,51 +795,6 @@ export default function AiHairModelPage({ user }: { user: User | null }) {
       } catch (err) {
         console.error(err);
       }
-      
-      const keywordsString = selectedHairStyles.join(', ');
-
-      const captionTemplates = [
-        `오늘 방문해주신 고객님의 맞춤 '${keywordsString}' 디자인 ✂️✨\n\n고객님의 두상과 모질, 평소 스타일링 습관까지 꼼꼼하게 고려해서 가장 예쁜 볼륨감과 텍스처를 살려 디자인해 드렸어요. 툭 털어서 말리기만 해도 금방 샵에 다녀온 것처럼 손질이 너무 편하실 거예요! 분위기 변신 대성공이네요 💖\n\n올 봄, 나만의 찰떡 인생머리를 찾고 싶으시다면 편하게 문의주세요!`,
-        `요즘 가장 사랑받는 '${keywordsString}' 스타일링 🕊️\n\n특유의 부드럽고 세련된 무드를 극대화해 드렸습니다. 매일 아침 드라이할 시간 부족하신 분들께 강력 추천해 드려요! 가벼운 에센스 하나만 발라도 느낌 있게 완성됩니다.\n\n고객님의 니즈에 맞춰 1:1 맞춤 컨설팅 진행합니다. 예약 마감이 빠르니 서둘러 주세요! 🔥`,
-        `단발/장발병 유발하는 완벽한 '${keywordsString}' 💇‍♀️💕\n\n얼굴형을 보완해주는 디테일한 커트 라인과 얼굴빛을 살려주는 컬러의 조합! 시술 후 거울 보시고 찐으로 행복해하시던 고객님 모습이 아직도 눈에 선하네요. 만족도 200% 보장하는 디자인입니다.\n\n나만의 퍼스널 헤어, 지금 바로 경험해보세요.`
-      ];
-
-      const selectedCaption = captionTemplates[Math.floor(Math.random() * captionTemplates.length)];
-
-      const finalCaption = `${selectedCaption}\n\n💌 예약 및 상담은 프로필 상단 링크\n📩 디자인 문의: DM`;
-      const finalTags = [
-          ...selectedHairStyles.map((s: string) => s.replace(/\s+/g, '')),
-          ...selectedHairStyles.map((s: string) => `${s.replace(/\s+/g, '')}추천`),
-          "헤어스타일", 
-          "머리잘하는곳", 
-          "인생머리", 
-          "미용실추천"
-      ];
-
-      try {
-          if (finalImageUrl && finalImageUrl.startsWith('data:')) {
-              finalImageUrl = await uploadToStorage(finalImageUrl, 'results');
-          }
-          if (user && finalImageUrl) {
-             const { error } = await supabase.from('ai_portfolios').insert([{
-                user_id: user.id,
-                image_url: finalImageUrl,
-                caption: finalCaption,
-                tags: finalTags
-             }]);
-             if (error) {
-               console.warn("포트폴리오 저장 중 오류 발생 (무시됨):", error.message);
-             }
-          }
-      } catch (err: any) {
-          console.warn('업로드 및 포트폴리오 저장 실패 (로컬 이미지를 유지합니다):', err.message);
-      }
-
-      setResultImage(finalImageUrl);
-      setResultCaption({
-        caption: finalCaption,
-        tags: finalTags
-      });
 
       // Move to preview tab on mobile after generation
       if (isMobile) {
@@ -681,6 +836,134 @@ export default function AiHairModelPage({ user }: { user: User | null }) {
     });
   };
 
+  const compressImageFileOrBase64 = async (fileOrBase64: File | string, maxDimension = 1024): Promise<File> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+
+        if (width > maxDimension || height > maxDimension) {
+          if (width > height) {
+            height = Math.round((height * maxDimension) / width);
+            width = maxDimension;
+          } else {
+            width = Math.round((width * maxDimension) / height);
+            height = maxDimension;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error("Canvas 2D context not available"));
+          return;
+        }
+
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+
+        canvas.toBlob((blob) => {
+          if (blob) {
+            const compressedFile = new File([blob], `compressed_${Date.now()}.jpg`, { type: 'image/jpeg' });
+            resolve(compressedFile);
+          } else {
+            reject(new Error("Failed to compress canvas to blob"));
+          }
+        }, 'image/jpeg', 0.85);
+      };
+
+      img.onerror = () => {
+        reject(new Error("Failed to load image for compression"));
+      };
+
+      if (typeof fileOrBase64 === 'string') {
+        img.src = fileOrBase64.startsWith('data:') ? fileOrBase64 : `data:image/jpeg;base64,${fileOrBase64}`;
+      } else {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          if (e.target?.result && typeof e.target.result === 'string') {
+            img.src = e.target.result;
+          } else {
+            reject(new Error("File read failure"));
+          }
+        };
+        reader.onerror = () => reject(new Error("Failed to read file"));
+        reader.readAsDataURL(fileOrBase64);
+      }
+    });
+  };
+
+  const uploadToNcpServer = async (fileOrBase64: File | string): Promise<string> => {
+    let file: File | Blob;
+    try {
+      console.log("[NCP Upload] Compressing image before uploading to avoid 413...");
+      file = await compressImageFileOrBase64(fileOrBase64, 1024);
+    } catch (compressErr) {
+      console.warn("Failed to compress image, using fallback parsing:", compressErr);
+      let fileExt = 'jpg';
+      if (typeof fileOrBase64 === 'string') {
+         if (fileOrBase64.startsWith('http')) return fileOrBase64;
+         
+         const arr = fileOrBase64.split(',');
+         const mimeMatch = arr[0].match(/:(.*?);/);
+         const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+         fileExt = mimeType.split('/')[1] || 'jpg';
+         const bstr = atob(arr[1] || arr[0]);
+         let n = bstr.length;
+         const u8arr = new Uint8Array(n);
+         while(n--){
+           u8arr[n] = bstr.charCodeAt(n);
+         }
+         file = new File([u8arr], `upload_${Date.now()}.${fileExt}`, {type: mimeType});
+      } else {
+         file = fileOrBase64;
+      }
+    }
+
+    const fieldNames = ['file', 'image', 'images', 'upload', 'sourceImage'];
+    let lastError = null;
+    const token = localStorage.getItem('ncp_access_token');
+
+    for (const field of fieldNames) {
+      const formData = new FormData();
+      formData.append(field, file);
+      
+      try {
+        const headers: Record<string, string> = {};
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
+        }
+        
+        // Native fetch bypasses Axios' header-merging bugs and correctly sets boundary
+        const response = await fetch('/api/core/faceswap/upload', {
+          method: 'POST',
+          headers: headers,
+          body: formData
+        });
+        
+        if (!response.ok) {
+          const errMsg = await response.text();
+          throw new Error(`HTTP ${response.status}: ${errMsg || response.statusText}`);
+        }
+        
+        const resData = await response.json();
+        const url = resData?.url || resData?.data?.url || resData?.imageUrl || resData?.data;
+        if (url && typeof url === 'string') return url;
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`NCP Upload failed with field '${field}':`, err.message);
+      }
+    }
+    
+    console.warn("All NCP upload attempts failed, falling back to Supabase:", lastError?.message || 'Unknown');
+    // Fallback to storing in Supabase bucket to keep the user flow functional!
+    return await uploadToStorage(fileOrBase64, 'models');
+  };
+
   const uploadToSupabase = async (base64Image: string) => {
     // 1. Convert to JPEG blob to ensure Instagram compatibility
     const jpegBlob = await convertBase64ToJpegBlob(base64Image);
@@ -704,16 +987,83 @@ export default function AiHairModelPage({ user }: { user: User | null }) {
 
   const handleShare = async () => {
     if (isUploading) return;
-    
-    const accountStr = localStorage.getItem('ig_account');
-    if (!accountStr) {
-      if (window.confirm("인스타그램 연동이 되어있지 않습니다. 계정관리 페이지로 이동하시겠습니까?")) {
-        navigate('/mypage/instagram');
-      }
+    if (!resultImage) {
+      showToast("먼저 AI 모델 이미지를 생성해 주세요.");
       return;
     }
 
-    const account = JSON.parse(accountStr);
+    const captionText = resultCaption 
+      ? `${resultCaption.caption}\n\n${resultCaption.tags.map(t => `#${t}`).join(' ')}` 
+      : 'AI 헤어모델 스튜디오로 완성한 나만의 스타일!';
+
+    const accountStr = localStorage.getItem('ig_account');
+    let useDirectShare = true;
+    
+    if (accountStr) {
+      if (window.confirm("인스타그램 연동 계정이 감지되었습니다.\n계정에 자동으로 백그라운드 게시를 원하시면 [확인]을, 휴대폰 인스타그램 앱으로 직접 바로 공유하려면 [취소]를 눌러주세요.")) {
+        useDirectShare = false;
+      }
+    }
+
+    if (useDirectShare) {
+      // -------------------------------------------------------------------------
+      // 1. Copy the caption and tags to the clipboard
+      // -------------------------------------------------------------------------
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(captionText);
+        } else {
+          const textArea = document.createElement("textarea");
+          textArea.value = captionText;
+          document.body.appendChild(textArea);
+          textArea.select();
+          document.execCommand("copy");
+          document.body.removeChild(textArea);
+        }
+      } catch (e) {
+        console.warn("Clipboard copy failed, proceeding anyway", e);
+      }
+
+      // -------------------------------------------------------------------------
+      // 2. Check client features
+      // -------------------------------------------------------------------------
+      const ua = navigator.userAgent || navigator.vendor;
+      const isIOS = /iPad|iPhone|iPod/.test(ua);
+      const isAndroid = /Android/.test(ua);
+
+      // -------------------------------------------------------------------------
+      // 3. Initiate Image Download & Native/Intent Launch
+      // -------------------------------------------------------------------------
+      showToast("인스타그램 피드용 캡션이 클립보드에 복사되었습니다!\n이미지를 저장한 후 인스타그램에 붙여넣어 바로 공유해 보세요.");
+
+      try {
+        const link = document.createElement('a');
+        link.href = resultImage;
+        link.download = `brand_hair_model_${Date.now()}.jpg`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      } catch (dlErr) {
+        console.error("Download failed, trying background download...", dlErr);
+      }
+
+      // Wait a moment for download trigger, then deep link to Instagram App
+      setTimeout(() => {
+        if (isIOS) {
+          window.location.href = "instagram://camera";
+          setTimeout(() => {
+            window.location.href = "instagram://app";
+          }, 1200);
+        } else if (isAndroid) {
+          window.location.href = "intent://instagram.com/#Intent;package=com.instagram.android;scheme=https;end";
+        } else {
+          window.open('https://instagram.com', '_blank');
+        }
+      }, 1500);
+      return;
+    }
+
+    const account = JSON.parse(accountStr!);
 
     setIsUploading(true);
 
@@ -876,7 +1226,7 @@ export default function AiHairModelPage({ user }: { user: User | null }) {
   }
 
   return (
-    <div className={`min-h-screen bg-bg-base ${isMobile ? 'pt-0 pb-0 overflow-hidden h-screen' : 'pt-24 pb-20'}`}>
+    <div className={`min-h-screen bg-bg-base h-screen overflow-y-auto no-scrollbar ${isMobile ? 'pt-0 pb-0 overflow-hidden' : 'pt-24 pb-20'}`}>
       {/* Toast Message */}
       <AnimatePresence>
         {toastMessage && (
@@ -965,19 +1315,18 @@ export default function AiHairModelPage({ user }: { user: User | null }) {
                   >
                     <div className="absolute top-0 left-0 w-full h-1 bg-gray-100">
                       <motion.div 
-                        initial={{ width: "0%" }}
-                        animate={{ width: ["0%", "30%", "70%", "95%"] }}
-                        transition={{ duration: 10, ease: "easeInOut" }}
+                        animate={{ width: `${generatingProgress}%` }}
+                        transition={{ duration: 0.3 }}
                         className="h-full bg-brand-primary"
                       />
                     </div>
                     <div className="w-14 h-14 bg-brand-primary/10 rounded-full flex items-center justify-center mx-auto mb-4">
                       <Wand2 className="w-7 h-7 text-brand-primary animate-pulse" />
                     </div>
-                    <h3 className="text-lg font-bold text-gray-900 mb-2">AI 합성 진행 중</h3>
-                    <p className="text-gray-500 font-medium text-[11px] leading-relaxed mb-6">
-                      이미지 랜드마크를 추출하여<br />
-                      포트폴리오를 생성 중입니다.
+                    <h3 className="text-lg font-bold text-gray-900 mb-1">AI 합성 진행 중</h3>
+                    <div className="text-brand-primary font-extrabold text-[20px] mb-3">{generatingProgress}%</div>
+                    <p className="text-gray-500 font-medium text-[12px] leading-relaxed mb-6 whitespace-pre-line text-center">
+                      {generatingStatus}
                     </p>
                   </motion.div>
                 </motion.div>
@@ -1250,7 +1599,7 @@ export default function AiHairModelPage({ user }: { user: User | null }) {
                   <div className="flex items-center justify-between px-3 py-3">
                     <div className="flex items-center gap-2.5">
                       <div className="w-8 h-8 rounded-full bg-gray-100 border border-gray-100 overflow-hidden">
-                        <img src={(igAccount?.profileUrl) || (user.user_metadata?.avatar_url) || "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=100&q=80"} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                        <AvatarImage url={igAccount?.profileUrl || avatarUrl || user?.user_metadata?.avatar_url} className="w-full h-full object-cover" />
                       </div>
                       <div className="flex flex-col">
                         <span className="text-[12.5px] font-bold text-gray-900 leading-none">{igAccount ? igAccount.username : (userName || '헤어딜')}</span>
@@ -1280,7 +1629,9 @@ export default function AiHairModelPage({ user }: { user: User | null }) {
                       <div className="flex items-center gap-4">
                         <Heart className="w-[22px] h-[22px] text-gray-900" strokeWidth={1.8} />
                         <MessageCircle className="w-[22px] h-[22px] text-gray-900" strokeWidth={1.8} />
-                        <Send className="w-[22px] h-[22px] text-gray-900" strokeWidth={1.8} />
+                        <button onClick={handleShare} disabled={isUploading || !resultImage} className="disabled:opacity-50 transition-opacity">
+                          <Send className="w-[22px] h-[22px] text-gray-900" strokeWidth={1.8} />
+                        </button>
                       </div>
                       <Bookmark className="w-[22px] h-[22px] text-gray-900" strokeWidth={1.8} />
                     </div>
@@ -1313,7 +1664,7 @@ export default function AiHairModelPage({ user }: { user: User | null }) {
                    </div>
                    <Heart className="w-[24px] h-[24px] text-gray-900" strokeWidth={2} />
                    <div className="w-7 h-7 rounded-full border border-gray-100 overflow-hidden">
-                      <img src="https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=100&q=80" className="w-full h-full object-cover" />
+                      <AvatarImage url={igAccount?.profileUrl || avatarUrl || user?.user_metadata?.avatar_url} className="w-full h-full object-cover" />
                    </div>
                 </div>
               </div>

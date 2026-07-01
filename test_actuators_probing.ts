@@ -2,8 +2,8 @@ import axios from 'axios';
 
 async function run() {
   const hosts = [
-    'http://localhost:3000/api/account',
-    'http://localhost:3000/api/core',
+    'http://account.cubric.io',
+    'http://hairdeal.cubric.io',
   ];
 
   const paths = [

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { supabase } from '../supabase';
-import { Coffee, MessageCircle, MapPin, Wifi, KeyRound, Car, Building2, Store, X, CheckCircle2, History, ClipboardList, Info, AlertCircle, BellRing, Copy, Check } from 'lucide-react';
+import { Coffee, MessageCircle, MapPin, Wifi, KeyRound, Car, Building2, Store, X, CheckCircle2, History, ClipboardList, Info, AlertCircle, BellRing, Copy, Check, Phone, Clock } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { QR_THEMES } from '../constants/qrThemes';
 
@@ -553,6 +553,53 @@ export default function MobileShopView() {
               </div>
             </div>
           )}
+          {(() => {
+            try {
+              if (shop.wifi_info) {
+                const parsed = JSON.parse(shop.wifi_info);
+                if (parsed && typeof parsed === 'object' && parsed.phone) {
+                  return (
+                    <div className="p-5 flex items-start gap-4">
+                      <div className="p-2 rounded-xl bg-black/5 theme-subtext"><Phone className="w-5 h-5" /></div>
+                      <div className="flex-1 w-full overflow-hidden">
+                         <h4 className="font-bold text-sm theme-text mb-1">매장 연락처</h4>
+                         <div className="flex items-center justify-between mt-1">
+                           <span className="text-sm font-bold theme-text tracking-wide truncate">{parsed.phone}</span>
+                           <button 
+                             onClick={() => handleCopy(parsed.phone, 'phone_num')}
+                             className="flex items-center gap-1.5 px-3 py-1.5 bg-white rounded-lg shadow-sm font-bold text-xs theme-text hover:bg-gray-50 transition-colors shrink-0 border border-black/5"
+                           >
+                             {copiedItem === 'phone_num' ? <Check className="w-3.5 h-3.5 text-green-600" /> : <Copy className="w-3.5 h-3.5 opacity-70" />}
+                             <span className={copiedItem === 'phone_num' ? 'text-green-600' : ''}>{copiedItem === 'phone_num' ? '복사완료' : '연락처 복사'}</span>
+                           </button>
+                         </div>
+                      </div>
+                    </div>
+                  );
+                }
+              }
+            } catch {}
+            return null;
+          })()}
+          {(() => {
+            try {
+              if (shop.wifi_info) {
+                const parsed = JSON.parse(shop.wifi_info);
+                if (parsed && typeof parsed === 'object' && parsed.operating_hours) {
+                  return (
+                    <div className="p-5 flex items-start gap-4">
+                      <div className="p-2 rounded-xl bg-black/5 theme-subtext"><Clock className="w-5 h-5" /></div>
+                      <div>
+                         <h4 className="font-bold text-sm theme-text">운영 요일/시간</h4>
+                         <p className="text-sm mt-1 whitespace-pre-line theme-subtext opacity-80">{parsed.operating_hours}</p>
+                      </div>
+                    </div>
+                  );
+                }
+              }
+            } catch {}
+            return null;
+          })()}
           {shop.parking_info && (
             <div className="p-5 flex items-start gap-4">
               <div className="p-2 rounded-xl bg-black/5 theme-subtext"><Car className="w-5 h-5" /></div>

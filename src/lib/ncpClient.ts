@@ -9,6 +9,7 @@ export const accountClient = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  timeout: 10000,
 });
 
 export const apiClient = axios.create({
@@ -16,6 +17,7 @@ export const apiClient = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  timeout: 10000,
 });
 
 const applyTokenInterceptors = (client: AxiosInstance) => {

@@ -88,7 +88,7 @@ export default function AuthCallbackPage() {
               <div className="animate-spin rounded-full h-16 w-16 border-4 border-gray-100 border-t-brand-primary"></div>
               <div className="absolute text-brand-primary font-bold text-xs">GO</div>
             </div>
-            <h2 className="text-xl font-black text-gray-900 mb-2">구글 로그인 처리 중</h2>
+            <h2 className="text-xl font-black text-gray-900 mb-2">소셜 로그인 처리 중</h2>
             <p className="text-gray-500 text-sm font-medium leading-relaxed">
               안전하게 계정 정보를 연동하고 있습니다.<br />이 창은 로그인이 완료되면 자동으로 닫힙니다.
             </p>

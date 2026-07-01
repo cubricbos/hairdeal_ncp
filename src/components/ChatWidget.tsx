@@ -58,7 +58,8 @@ export default function ChatWidget({ user }: ChatWidgetProps) {
   useEffect(() => {
     const loadConfig = async () => {
       try {
-        const { data } = await supabase.from('cs_notices').select('content').eq('title', CS_CONFIG_TITLE).single();
+        const { data: rows } = await supabase.from('cs_notices').select('content').eq('title', CS_CONFIG_TITLE).limit(1);
+        const data = rows?.[0];
         if (data && data.content) {
            const parsed = JSON.parse(data.content);
            if (Array.isArray(parsed)) {

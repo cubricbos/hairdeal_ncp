@@ -81,11 +81,13 @@ export default function ChatbotEditor() {
   const fetchConfig = async () => {
     setIsLoading(true);
     try {
-      const { data, error } = await supabase
+      const { data: rows, error } = await supabase
         .from('cs_notices')
         .select('content')
         .eq('title', CS_CONFIG_TITLE)
-        .single();
+        .limit(1);
+      
+      const data = rows?.[0];
       
       if (data && data.content) {
         const parsed = JSON.parse(data.content);
@@ -116,11 +118,13 @@ export default function ChatbotEditor() {
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      const { data: existing } = await supabase
+      const { data: rows } = await supabase
         .from('cs_notices')
         .select('id')
         .eq('title', CS_CONFIG_TITLE)
-        .single();
+        .limit(1);
+
+      const existing = rows?.[0];
 
       if (existing) {
         await supabase.from('cs_notices').update({

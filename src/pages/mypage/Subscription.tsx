@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { motion } from 'motion/react';
 import { Check, Zap, Crown, Star, Loader2 } from 'lucide-react';
 import { supabase } from '../../supabase';
 import { useNavigate } from 'react-router-dom';
 import { useSiteContext } from '../../context/SiteContext';
+import { safeJwtDecode, retrySupabaseSelect } from '../../lib/supabase-utils';
 
 const SubscriptionPage: React.FC = () => {
   const navigate = useNavigate();
@@ -13,9 +14,23 @@ const SubscriptionPage: React.FC = () => {
   const [processing, setProcessing] = useState(false);
   const [isYearly, setIsYearly] = useState(false);
   const pricing = settings?.pricing || { plans: [], yearlyBillingEnabled: false, yearlyDiscountRate: 0 };
+  const isMounted = useRef(true);
 
   useEffect(() => {
+    isMounted.current = true;
+    
+    const safetyTimeoutId = setTimeout(() => {
+      if (isMounted.current) {
+        console.warn("[Subscription] Profile loading took too long, enforcing safety spinner dropdown.");
+        setLoading(false);
+      }
+    }, 3500);
+
     fetchProfile();
+    return () => {
+      isMounted.current = false;
+      clearTimeout(safetyTimeoutId);
+    };
   }, []);
 
   const fetchProfile = async () => {
@@ -24,41 +39,44 @@ const SubscriptionPage: React.FC = () => {
     // Support NCP User Token parsing
     if (ncpToken) {
       try {
-        const payloadPart = ncpToken.split('.')[1];
-        const decodedStr = decodeURIComponent(escape(atob(payloadPart)));
-        const decoded = JSON.parse(decodedStr);
-        let fullUuid = decoded.id;
-        if (fullUuid && !fullUuid.includes('-')) {
-           fullUuid = `${fullUuid.substring(0, 8)}-${fullUuid.substring(8, 12)}-${fullUuid.substring(12, 16)}-${fullUuid.substring(16, 20)}-${fullUuid.substring(20)}`;
-        }
-
-        try {
-          let { data, error } = await supabase.from('profiles').select('*').eq('id', fullUuid).maybeSingle();
-          if (!data && decoded.email) {
-            const { data: emailData } = await supabase.from('profiles').select('*').eq('email', decoded.email).maybeSingle();
-            if (emailData) data = emailData;
+        const decoded = safeJwtDecode(ncpToken);
+        if (decoded && decoded.id) {
+          let fullUuid = decoded.id;
+          if (fullUuid && !fullUuid.includes('-')) {
+             fullUuid = `${fullUuid.substring(0, 8)}-${fullUuid.substring(8, 12)}-${fullUuid.substring(12, 16)}-${fullUuid.substring(16, 20)}-${fullUuid.substring(20)}`;
           }
-          if (data) {
-             setProfile(data);
-             setLoading(false);
-             return;
-          }
-        } catch (supabaseErr) {
-          console.warn("Supabase query error in subscription search:", supabaseErr);
-        }
 
-        // Fallback if not flushed to Supabase yet or if RLS error occurred
-        setProfile({
-           id: fullUuid,
-           email: decoded.email || 'user@ncp.local',
-           full_name: decoded.name || '디자이너',
-           subscription_plan: 'Free',
-           subscription_status: 'active',
-           billing_key: null,
-           subscription_end_date: null
-        });
-        setLoading(false);
-        return;
+          try {
+            let spRes = await retrySupabaseSelect<any>(() => supabase.from('profiles').select('*').eq('id', fullUuid).maybeSingle() as any);
+            let data = spRes.data;
+            if (!data && decoded.email) {
+              const emailSpRes = await retrySupabaseSelect<any>(() => supabase.from('profiles').select('*').eq('email', decoded.email).maybeSingle() as any);
+              if (emailSpRes.data) data = emailSpRes.data;
+            }
+            if (data && isMounted.current) {
+               setProfile(data);
+               setLoading(false);
+               return;
+            }
+          } catch (supabaseErr) {
+            console.warn("Supabase query error in subscription search:", supabaseErr);
+          }
+
+          if (isMounted.current) {
+            // Fallback if not flushed to Supabase yet or if RLS error occurred
+            setProfile({
+               id: fullUuid,
+               email: decoded.email || 'user@ncp.local',
+               full_name: decoded.name || '디자이너',
+               subscription_plan: 'Free',
+               subscription_status: 'active',
+               billing_key: null,
+               subscription_end_date: null
+            });
+            setLoading(false);
+          }
+          return;
+        }
       } catch(e) {
         console.warn("NCP Parse error in subscription page", e);
       }
@@ -69,38 +87,44 @@ const SubscriptionPage: React.FC = () => {
       const user = session?.user;
       if (user) {
         try {
-          const { data, error } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
-          if (data) {
-             setProfile(data);
-          } else {
-             // Fallback profile if row doesn't exist
-             setProfile({
-                id: user.id,
-                email: user.email || 'user@example.com',
-                full_name: '사용자',
-                subscription_plan: 'Free',
-                subscription_status: 'active',
-                billing_key: null,
-                subscription_end_date: null
-             });
+          const { data } = await retrySupabaseSelect<any>(() => supabase.from('profiles').select('*').eq('id', user.id).maybeSingle() as any);
+          if (isMounted.current) {
+            if (data) {
+               setProfile(data);
+            } else {
+               // Fallback profile if row doesn't exist
+               setProfile({
+                  id: user.id,
+                  email: user.email || 'user@example.com',
+                  full_name: '사용자',
+                  subscription_plan: 'Free',
+                  subscription_status: 'active',
+                  billing_key: null,
+                  subscription_end_date: null
+               });
+            }
           }
         } catch (dbErr) {
           console.warn("Database error in reading fallback, defaulting mock properties", dbErr);
-          setProfile({
-             id: user.id,
-             email: user.email || 'customer@example.com',
-             full_name: '테스트 원장님 (Mock)',
-             subscription_plan: 'Business',
-             subscription_status: 'active',
-             billing_key: 'mock_billing_key_123',
-             subscription_end_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
-          });
+          if (isMounted.current) {
+            setProfile({
+               id: user.id,
+               email: user.email || 'customer@example.com',
+               full_name: '테스트 원장님 (Mock)',
+               subscription_plan: 'Business',
+               subscription_status: 'active',
+               billing_key: 'mock_billing_key_123',
+               subscription_end_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+            });
+          }
         }
       }
     } catch (sessionErr) {
        console.warn("Auth session fetch error", sessionErr);
     }
-    setLoading(false);
+    if (isMounted.current) {
+      setLoading(false);
+    }
   };
 
   const handleSubscribe = async (plan: any, amount: number) => {

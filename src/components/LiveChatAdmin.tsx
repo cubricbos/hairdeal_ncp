@@ -164,7 +164,8 @@ export default function LiveChatAdmin({ adminUser }: { adminUser: SupabaseUser |
         let greetingNonMember = "안녕하세요! 상담사가 연결되었습니다. 무엇을 도와드릴까요?";
         
         try {
-           const { data } = await supabase.from('cs_notices').select('content').eq('title', 'SYSTEM_CHATBOT_CONFIG').single();
+           const { data: rows } = await supabase.from('cs_notices').select('content').eq('title', 'SYSTEM_CHATBOT_CONFIG').limit(1);
+            const data = rows?.[0];
            if (data && data.content) {
               const parsed = JSON.parse(data.content);
               if (!Array.isArray(parsed)) {

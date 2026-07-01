@@ -61,11 +61,11 @@
 .blob-2 { @apply w-[400px] h-[400px] bg-brand-accent -bottom-20 -left-20; }
 
 @layer utilities {
-  .hide-scrollbar {
+  .hide-scrollbar, .no-scrollbar {
     -ms-overflow-style: none; /* IE and Edge */
     scrollbar-width: none; /* Firefox */
   }
-  .hide-scrollbar::-webkit-scrollbar {
+  .hide-scrollbar::-webkit-scrollbar, .no-scrollbar::-webkit-scrollbar {
     display: none; /* Chrome, Safari and Opera */
   }
 }

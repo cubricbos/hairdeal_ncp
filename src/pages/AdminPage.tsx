@@ -61,6 +61,7 @@ import { GeminiApiKeyManager } from "../components/admin/GeminiApiKeyManager";
 import { useSiteContext } from "../context/SiteContext";
 import { accountClient, apiClient } from "../lib/ncpClient";
 import { logPrivacyAction } from "../lib/auditLogger";
+import axios from "axios";
 
 interface Inquiry {
   id: string;
@@ -169,22 +170,22 @@ const SortableModelCard = ({
             {model.gender === "female" ? "여성 모델" : "남성 모델"}
           </span>
         </div>
-        <div className="absolute top-3 right-3 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-20">
-          <button
-            onClick={() => onEditClick(model)}
-            className="p-2 bg-white/95 text-indigo-600 rounded-full shadow-sm hover:bg-indigo-50 border border-gray-100 transition-colors"
-            title="수정"
-          >
-            <Edit2 className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() => onDeleteClick(model)}
-            className="p-2 bg-white/95 text-red-500 rounded-full shadow-sm hover:bg-red-50 border border-gray-100 transition-colors"
-            title="삭제"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
-        </div>
+              <div className="absolute top-3 right-3 flex gap-1.5 opacity-100 transition-opacity z-20">
+                <button
+                  onClick={() => onEditClick(model)}
+                  className="p-2 bg-white/95 text-indigo-600 rounded-full shadow-sm hover:bg-indigo-50 border border-gray-100 transition-colors"
+                  title="수정"
+                >
+                  <Edit2 className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => onDeleteClick(model)}
+                  className="p-2 bg-white/95 text-red-500 rounded-full shadow-sm hover:bg-red-50 border border-gray-100 transition-colors"
+                  title="삭제"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
       </div>
       <div className="p-4">
         <p className="text-sm font-bold text-gray-900 line-clamp-2 leading-tight">
@@ -292,6 +293,7 @@ export default function AdminPage({ user }: { user: User | null }) {
   );
   const [newModelDesc, setNewModelDesc] = useState("");
   const [newModelUrl, setNewModelUrl] = useState("");
+  const [newModelFile, setNewModelFile] = useState<File | null>(null);
   const [isSubmittingModel, setIsSubmittingModel] = useState(false);
   const [filterGender, setFilterGender] = useState<"all" | "female" | "male">(
     "all",
@@ -322,20 +324,83 @@ export default function AdminPage({ user }: { user: User | null }) {
   const [selectedDesignerDetail, setSelectedDesignerDetail] = useState<any | null>(null);
   const [fetchingDesignerDetail, setFetchingDesignerDetail] = useState(false);
 
-  const fetchDesignerDetail = async (profileId: string) => {
+  const fetchDesignerDetail = async (profile: any) => {
     setFetchingDesignerDetail(true);
     setSelectedDesignerDetail(null);
+    const profileId = profile.id;
+    let ncpTxs: any[] = [];
+    try {
+      // Fetch credit history sync for this designer directly from NCP
+      let allNcpTxs: any[] = [];
+      let currentPage = 1;
+      let keepFetching = true;
+      while (keepFetching) {
+         try {
+           const res = await apiClient.get('/faceswap/credit/history', { 
+              params: { month: 12, filter: 'ALL', pageNo: currentPage, pageSize: 50, designerId: profileId } 
+           });
+           const items = res.data?.content || res.data?.data || res.data?.items || res.data;
+           if (items && Array.isArray(items) && items.length > 0) {
+              allNcpTxs = [...allNcpTxs, ...items];
+              const totalCount = res.data?.totalElements || res.data?.totalCount || 0;
+              if (totalCount > 0 && allNcpTxs.length < totalCount) {
+                  currentPage++;
+              } else {
+                  keepFetching = false;
+              }
+           } else {
+              keepFetching = false;
+           }
+         } catch (e1) {
+           try {
+             const res = await accountClient.get('/faceswap/credit/history', { 
+                params: { month: 12, filter: 'ALL', pageNo: currentPage, pageSize: 50, designerId: profileId } 
+             });
+             const items = res.data?.content || res.data?.data || res.data?.items || res.data;
+             if (items && Array.isArray(items) && items.length > 0) {
+                allNcpTxs = [...allNcpTxs, ...items];
+                const totalCount = res.data?.totalElements || res.data?.totalCount || 0;
+                if (totalCount > 0 && allNcpTxs.length < totalCount) {
+                    currentPage++;
+                } else {
+                    keepFetching = false;
+                }
+             } else {
+                keepFetching = false;
+             }
+           } catch (e2) {
+             keepFetching = false;
+           }
+         }
+      }
+      ncpTxs = allNcpTxs;
+    } catch(e) { console.log('Credit fetch err'); }
+
     try {
       // Use core admin designer detail API instead of accountClient
       const { data } = await apiClient.get('/admin/designer', {
         params: { designerId: profileId }
       });
-      setSelectedDesignerDetail(data);
+      // NCP list gives us 'credit', but detail object doesn't, so we merge
+      setSelectedDesignerDetail({ 
+        ...profile, 
+        ...data, 
+        career: null,
+        introduce: data.introduce || data.introduction || null,
+        ncpCreditHistory: ncpTxs, 
+        supaProfile: profile 
+      });
     } catch (err: any) {
       console.warn('Failed to fetch designer details from core admin API, trying accountClient fallback:', err);
       try {
         const { data } = await accountClient.get(`/designer/detail/${profileId}`);
-        setSelectedDesignerDetail(data);
+        setSelectedDesignerDetail({ 
+           ...profile, 
+           ...data, 
+           career: null,
+           ncpCreditHistory: ncpTxs, 
+           supaProfile: profile 
+        });
       } catch (fallbackErr) {
         console.error('Failed to fetch designer details from all endpoints:', fallbackErr);
         alert('디자이너 상세 정보를 불러오는데 실패했습니다.');
@@ -586,26 +651,27 @@ export default function AdminPage({ user }: { user: User | null }) {
         console.error("Error fetching inquiries:", inquiryError);
       else setInquiries(inquiryData || []);
 
-      // Fetch AI Models
-      let modelsData = [];
-      const { data: sortedData, error: sortedError } = await supabase
-        .from("ai_models")
-        .select("*")
-        .order("sort_order", { ascending: true })
-        .order("created_at", { ascending: false });
-
-      if (sortedError) {
-        // Schema possibly missing sort_order, fallback to created_at
-        console.warn("sort_order not found, querying without it.");
-        const { data: fallbackData } = await supabase
-          .from("ai_models")
-          .select("*")
-          .order("created_at", { ascending: false });
-        modelsData = fallbackData || [];
-      } else {
-        modelsData = sortedData || [];
+      // Fetch AI Models from NCP API
+      try {
+        const modelsRes = await apiClient.get('/faceswap/models');
+        if (modelsRes.data && modelsRes.data.data) {
+          const mappedModels = modelsRes.data.data.map((m: any) => ({
+            id: m.uid,
+            gender: m.gender?.toLowerCase() || 'female',
+            description: m.description || m.name || '',
+            name: m.name || '',
+            image_url: m.file?.details?.[0] ? `https://api.cubric.io/api/storage?fileName=${m.file.details[0]}` : '',
+            is_active: true,
+            sort_order: m.id // NCP id as proxy for sort_order or similar
+          }));
+          // Sort by id descending
+          mappedModels.sort((a: any, b: any) => b.sort_order - a.sort_order);
+          setAiModels(mappedModels);
+        }
+      } catch (err) {
+        console.error("Failed to fetch NCP AI models", err);
+        setAiModels([]);
       }
-      setAiModels(modelsData);
 
       // Fetch users from NCP API (instead of Supabase)
       let usersData: any[] | null = null;
@@ -642,13 +708,35 @@ export default function AdminPage({ user }: { user: User | null }) {
           console.warn("NCP response format unrecognized:", res.data);
         }
 
-        usersData = designersArray.map((designer: any) => ({
-          id: designer.id || designer.accountId || designer.designerId,
-          email: designer.email || designer.accountId,
-          full_name: designer.name || '이름 없음',
-          avatar_url: designer.profileImageUrl || null,
-          last_login_at: designer.lastLoginAt || designer.updatedAt || null,
-          credits: designer.credits || 0,
+        usersData = designersArray.map((designer: any) => {
+          let ncpAvatarUrl = designer.profileImageUrl || null;
+          const cands: string[] = [];
+          const pf = designer.profile;
+          if (pf) {
+            if (pf.thumbNailPath) cands.push(pf.thumbNailPath);
+            if (pf.fileName) cands.push(pf.fileName);
+            if (pf.savedFileName) cands.push(pf.savedFileName);
+            if (pf.savedPath) cands.push(pf.savedPath);
+            if (pf.path) cands.push(pf.path);
+            if (pf.url) cands.push(pf.url);
+            if (pf.id) cands.push(pf.id);
+            if (pf.fileId) cands.push(pf.fileId);
+            if (pf.file_id) cands.push(pf.file_id);
+          }
+          if (designer.file_id) cands.push(designer.file_id);
+          if (designer.fileId) cands.push(designer.fileId);
+          if (cands.length > 0) {
+            ncpAvatarUrl = Array.from(new Set(cands)).join(',');
+          }
+
+          return {
+            id: designer.id || designer.accountId || designer.designerId,
+            email: designer.email || designer.accountId,
+            full_name: designer.name || '이름 없음',
+            avatar_url: ncpAvatarUrl,
+            last_login_at: designer.lastLoginAt || designer.updatedAt || null,
+          credits: designer.credit ?? designer.credits ?? 0,
+          membershipCredit: designer.membershipCredit ?? 0,
           subscription_plan: designer.subscriptionPlan || null,
           subscription_status: designer.subscriptionStatus || 'inactive',
           subscription_end_date: designer.subscriptionEndDate || null,
@@ -660,7 +748,7 @@ export default function AdminPage({ user }: { user: User | null }) {
           is_cs_admin: designer.isCsAdmin || false,
           business_status: designer.businessStatus || 'active',
           role: designer.role || 'user'
-        }));
+        };});
 
         setHasCreditsColumn(true);
       } catch (err: any) {
@@ -696,7 +784,7 @@ export default function AdminPage({ user }: { user: User | null }) {
           try {
             const { data, error } = await supabase
               .from("profiles")
-              .select("id, email, full_name, avatar_url, last_login_at, credits, subscription_plan, subscription_status, subscription_end_date, created_at, billing_key, card_company, card_number, is_blacklisted, is_cs_admin, business_status, role")
+              .select("id, email, full_name, last_login_at, credits, subscription_plan, subscription_status, subscription_end_date, created_at, billing_key, card_company, card_number, is_blacklisted, is_cs_admin, business_status, role")
               .neq("role", "user");
               
             if (!error && data) {
@@ -764,12 +852,31 @@ export default function AdminPage({ user }: { user: User | null }) {
               // Fail silently since we already have the basic items data
             }
           }
+          let ncpAvatarUrl = ncpData.profileImageUrl || u.avatar_url;
+          const cands: string[] = [];
+          const pf = ncpData.profile;
+          if (pf) {
+            if (pf.thumbNailPath) cands.push(pf.thumbNailPath);
+            if (pf.fileName) cands.push(pf.fileName);
+            if (pf.savedFileName) cands.push(pf.savedFileName);
+            if (pf.savedPath) cands.push(pf.savedPath);
+            if (pf.path) cands.push(pf.path);
+            if (pf.url) cands.push(pf.url);
+            if (pf.id) cands.push(pf.id);
+            if (pf.fileId) cands.push(pf.fileId);
+            if (pf.file_id) cands.push(pf.file_id);
+          }
+          if (ncpData.file_id) cands.push(ncpData.file_id);
+          if (ncpData.fileId) cands.push(ncpData.fileId);
+          if (cands.length > 0) {
+            ncpAvatarUrl = Array.from(new Set(cands)).join(',');
+          }
           
           return {
             ...u,
             credits: u.credits !== undefined ? Number(u.credits || 0) : 0,
             full_name: ncpData.name || u.name || u.full_name,
-            avatar_url: ncpData.profileImageUrl || u.avatar_url,
+            avatar_url: ncpAvatarUrl,
             business_status: typeof ncpData.businessStatus === 'string' ? ncpData.businessStatus : (u.business_status || u.status || 'active'),
             ncp_synced: !!(ncpData.email || u.email) // Custom flag to show if they exist in NCP
           };
@@ -884,50 +991,56 @@ export default function AdminPage({ user }: { user: User | null }) {
     } catch (err) {
       console.error("Error in admin fetch:", err);
     } finally {
-      // Fetch the metrics & ranks for credits
-      const { data: txsData, error: txsError } = await supabase.from(
-        "credit_transactions",
-      ).select(`
-          type, amount, user_id, description
-      `).eq('type', 'spent');
+      try {
+        // Fetch the metrics & ranks for credits
+        const { data: txsData, error: txsError } = await supabase.from(
+          "credit_transactions",
+        ).select(`
+            type, amount, user_id, description
+        `).eq('type', 'spent');
 
-      const { data: usersData, error: usersError } = await supabase
-        .from('profiles')
-        .select('id, email');
+        const { data: profilesData, error: profilesError } = await supabase
+          .from('profiles')
+          .select('id, email');
 
-      const { data: paymentsData, error: paymentsError } = await supabase
-        .from('payments')
-        .select('amount, payment_type');
+        const { data: paymentsData, error: paymentsError } = await supabase
+          .from('payments')
+          .select('amount, payment_type');
 
-      if (!txsError && txsData && !usersError && usersData) {
-        const rankingMap: Record<string, number> = {};
-        // Map user IDs to emails from the usersData fetch
-        const userEmailMap: Record<string, string> = {};
-        usersData.forEach(u => { userEmailMap[u.id] = u.email; });
+        if (!txsError && txsData && !profilesError && Array.isArray(profilesData)) {
+          const rankingMap: Record<string, number> = {};
+          // Map user IDs to emails from the usersData fetch
+          const userEmailMap: Record<string, string> = {};
+          profilesData.forEach(u => { userEmailMap[u.id] = u.email; });
 
-        txsData.forEach((tx: any) => {
-          const email = userEmailMap[tx.user_id];
-          if (email) {
-            rankingMap[email] = (rankingMap[email] || 0) + tx.amount;
+          if (Array.isArray(txsData)) {
+            txsData.forEach((tx: any) => {
+              const email = userEmailMap[tx.user_id];
+              if (email) {
+                rankingMap[email] = (rankingMap[email] || 0) + tx.amount;
+              }
+            });
           }
-        });
 
-        const sortedRanking = Object.entries(rankingMap)
-          .map(([email, spent]) => ({ email, spent }))
-          .sort((a, b) => b.spent - a.spent)
-          .slice(0, 3);
+          const sortedRanking = Object.entries(rankingMap)
+            .map(([email, spent]) => ({ email, spent }))
+            .sort((a, b) => b.spent - a.spent)
+            .slice(0, 3);
 
-        setCreditRanking(sortedRanking);
+          setCreditRanking(sortedRanking);
+        }
+
+        if (!paymentsError && Array.isArray(paymentsData)) {
+          // 1. Calculate Revenue from the new 'payments' table (Primary source)
+          let totalRev = paymentsData.reduce((sum, p) => sum + (p.amount || 0), 0);
+          
+          setTotalCreditRevenue(totalRev);
+        }
+      } catch (err) {
+        console.error("Error calculating credit metrics:", err);
+      } finally {
+        setIsLoading(false);
       }
-
-      if (!paymentsError && paymentsData) {
-        // 1. Calculate Revenue from the new 'payments' table (Primary source)
-        let totalRev = paymentsData.reduce((sum, p) => sum + (p.amount || 0), 0);
-        
-        setTotalCreditRevenue(totalRev);
-      }
-
-      setIsLoading(false);
     }
   };
 
@@ -1146,10 +1259,33 @@ export default function AdminPage({ user }: { user: User | null }) {
     if (adjustAmount === 0) return;
     setAdjustingCredits(true);
     try {
-      const newCredits = (currentCredits || 0) + adjustAmount;
+      // 1. First try NCP Admin Credit Add API
+      let finalNewCredits = currentCredits + adjustAmount;
+      let ncpSuccess = false;
+
+      try {
+         // Using apiClient which proxies to http://hairdeal.cubric.io/api
+         const ncpRes = await apiClient.post('/faceswap/credit/admin/add', null, {
+            params: {
+              designerUid: userId,
+              amount: adjustAmount
+            }
+         });
+         
+         if (ncpRes.data) {
+           const c = ncpRes.data.credit || 0;
+           const m = ncpRes.data.membershipCredit || 0;
+           finalNewCredits = c + m;
+           ncpSuccess = true;
+         }
+      } catch (ncpErr: any) {
+         console.warn("NCP credit add failed, fallback to Supabase standalone:", ncpErr.response?.data || ncpErr.message);
+      }
+
+      // 2. Synchronize to Supabase profiles (either exact synced value or standalone calculated value)
       const { data: updatedData, error } = await supabase
         .from("profiles")
-        .update({ credits: newCredits })
+        .update({ credits: finalNewCredits })
         .eq("id", userId)
         .select();
 
@@ -1168,29 +1304,37 @@ export default function AdminPage({ user }: { user: User | null }) {
         );
       }
 
-      const adjustmentDescription = adjustAmount > 0 ? `관리자 크레딧 보상   + ${Math.abs(adjustAmount)}` : `관리자 크레딧 차감   - ${Math.abs(adjustAmount)}`;
+      // Skip Supabase logging if NCP succeeded, since NCP generates its own history log internally!
+      if (!ncpSuccess) {
+        const adjustmentDescription = adjustAmount > 0 ? `관리자 크레딧 보상   + ${Math.abs(adjustAmount)}` : `관리자 크레딧 차감   - ${Math.abs(adjustAmount)}`;
 
-      const { error: txError } = await supabase.from("credit_transactions").insert([
-        {
-          user_id: userId,
-          type: adjustAmount > 0 ? "earned" : "spent",
-          amount: Math.abs(adjustAmount),
-          description: adjustmentDescription,
-        },
-      ]);
+        const { error: txError } = await supabase.from("credit_transactions").insert([
+          {
+            user_id: userId,
+            type: adjustAmount > 0 ? "earned" : "spent",
+            amount: Math.abs(adjustAmount),
+            description: adjustmentDescription,
+          },
+        ]);
 
-      if (txError) {
-        if (txError.message.includes("row-level security") || txError.code === "42501") {
-          console.warn("RLS Error on credit_transactions. Transaction log skipped, but credits WERE updated.");
-          alert('내역 기록은 RLS 정책으로 실패했지만 크레딧은 정상 반영되었습니다!\n\n(database_setup_credits.sql 파일 내용을 Supabase SQL Editor에서 실행해주시면 내역도 기록됩니다.)');
-        } else {
-           console.error("Tx Error", txError);
+        if (txError) {
+          if (txError.message.includes("row-level security") || txError.code === "42501") {
+            console.warn("RLS Error on credit_transactions. Transaction log skipped, but credits WERE updated.");
+            alert('내역 기록은 RLS 정책으로 실패했지만 크레딧은 정상 반영되었습니다!\n\n(database_setup_credits.sql 파일 내용을 Supabase SQL Editor에서 실행해주시면 내역도 기록됩니다.)');
+          } else {
+             console.error("Tx Error", txError);
+          }
         }
       }
 
       await fetchData(); // Refresh all data to ensure sync
       window.dispatchEvent(new Event("credits_updated"));
-      alert("크레딧이 조정되었습니다.");
+      
+      if (ncpSuccess) {
+        alert(`NCP 서버에 크레딧이 조정되었습니다. 총 보유 크레딧: ${finalNewCredits} CR`);
+      } else {
+        alert("크레딧이 조정되었습니다.");
+      }
     } catch (err: any) {
       alert("실패: " + err.message);
     } finally {
@@ -1247,88 +1391,59 @@ export default function AdminPage({ user }: { user: User | null }) {
       if (editingModelId || files.length === 1) {
         // 단일 파일 업로드 또는 수정 모드
         const file = files[0];
-        const fileExt = file.name.split(".").pop();
-        const fileName = `${crypto.randomUUID()}.${fileExt}`;
-        const filePath = `${newModelGender}/${fileName}`;
-
-        const { error: uploadError } = await supabase.storage
-          .from("models")
-          .upload(filePath, file);
-
-        if (uploadError) throw uploadError;
-
-        const { data } = supabase.storage.from("models").getPublicUrl(filePath);
-        setNewModelUrl(data.publicUrl);
+        setNewModelFile(file);
+        setNewModelUrl(URL.createObjectURL(file));
       } else {
-        // 다중 파일 업로드 -> Storage 업로드 후 배열로 Bulk INSERT
-        const baseDesc =
-          newModelDesc ||
-          `${newModelGender === "female" ? "여성" : "남성"} 모델 이미지`;
-        const insertPayloads = [];
-
+        // 다중 파일 업로드 -> 바로 등록
+        let uploadedModels: any[] = [];
         for (let i = 0; i < files.length; i++) {
           const file = files[i];
-          const fileExt = file.name.split(".").pop() || "jpg";
-          const fileName = `${crypto.randomUUID()}.${fileExt}`;
-          const filePath = `${newModelGender}/${fileName}`;
+          const formData = new FormData();
+          formData.append('name', `${newModelGender === "female" ? "여성" : "남성"}`);
+          formData.append('description', newModelDesc || `${newModelGender === "female" ? "여성" : "남성"} 모델 이미지 (${i + 1})`);
+          formData.append('gender', newModelGender === "female" ? "Female" : "Male");
+          formData.append('file', file);
 
-          const { error: uploadError } = await supabase.storage
-            .from("models")
-            .upload(filePath, file);
-          if (uploadError) {
-            console.error(`Failed to upload ${file.name}:`, uploadError);
-            continue;
+          try {
+            const token = localStorage.getItem('ncp_access_token');
+            const res = await axios.post('/api/core/faceswap/upload', formData, {
+              headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (res.data) {
+              const m = res.data;
+              uploadedModels.push({
+                id: m.uid,
+                gender: m.gender?.toLowerCase() || newModelGender,
+                description: m.description || m.name || '',
+                name: m.name || '',
+                image_url: m.file?.details?.[0] ? `https://api.cubric.io/api/storage?fileName=${m.file.details[0]}` : '',
+                is_active: true,
+                sort_order: 0,
+              });
+            }
+          } catch(uploadErr) {
+            console.error(`Failed to upload ${file.name}:`, uploadErr);
           }
-
-          const { data: urlData } = supabase.storage
-            .from("models")
-            .getPublicUrl(filePath);
-          const dbDesc = `${baseDesc} (${i + 1})`;
-
-          insertPayloads.push({
-            gender: newModelGender,
-            description: dbDesc,
-            image_url: urlData.publicUrl,
-            is_active: true,
-          });
         }
 
-        if (insertPayloads.length > 0) {
-          const { data: dbDataList, error: dbError } = await supabase
-            .from("ai_models")
-            .insert(insertPayloads)
-            .select();
-
-          if (dbError) {
-            console.error("Bulk insert error:", dbError);
-            alert(`DB 저장 중 오류 발생: ${dbError.message}`);
-          } else if (dbDataList) {
-            setAiModels((prev) => [...dbDataList, ...prev]);
-            setTimeout(() => {
-              alert(
-                `${dbDataList.length}장의 이미지가 카테고리 [${newModelGender === "female" ? "여성" : "남성"}]에 일괄 등록되었습니다.`,
-              );
-            }, 100);
-            resetForm();
-            // 업로드한 카테고리로 필터 자동 변경
-            setFilterGender(newModelGender);
-          }
+        if (uploadedModels.length > 0) {
+          setAiModels((prev) => [...uploadedModels, ...prev]);
+          setTimeout(() => {
+            alert(
+              `${uploadedModels.length}장의 이미지가 카테고리 [${newModelGender === "female" ? "여성" : "남성"}]에 일괄 등록되었습니다.`,
+            );
+          }, 100);
+          resetForm();
+          setFilterGender(newModelGender);
         } else {
-          alert(
-            "등록된 이미지가 없습니다. 네트워크 또는 스토리지 권한 오류를 확인해주세요.",
-          );
+          alert("등록에 실패했습니다. (서버 오류)");
         }
       }
     } catch (err: any) {
       console.error("Upload error:", err);
-      alert(
-        "이미지 업로드 실패: " +
-          err.message +
-          "\n\n1. Supabase에서 'models' 버킷이 공개형(Public)으로 생성되었는지 확인해주세요.\n2. Storage RLS 권한이 올바로 설정되어 있는지 확인해주세요.",
-      );
+      alert("이미지 업로드 실패: " + err.message);
     } finally {
       setIsUploadingImage(false);
-      // 동일한 파일 재선택을 위해 value 초기화
       e.target.value = "";
     }
   };
@@ -1338,6 +1453,7 @@ export default function AdminPage({ user }: { user: User | null }) {
     setNewModelGender("female");
     setNewModelDesc("");
     setNewModelUrl("");
+    setNewModelFile(null);
   };
 
   const handleEditClick = (model: AiModel) => {
@@ -1345,6 +1461,7 @@ export default function AdminPage({ user }: { user: User | null }) {
     setNewModelGender(model.gender);
     setNewModelDesc(model.description);
     setNewModelUrl(model.image_url);
+    setNewModelFile(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -1356,64 +1473,73 @@ export default function AdminPage({ user }: { user: User | null }) {
     try {
       if (editingModelId) {
         // --- Edit Mode ---
-        // 1. Get the previous model to see if image changed
-        const prevModel = aiModels.find((m) => m.id === editingModelId);
-
-        // 2. If the URL changed, check if we need to delete the old image from storage
-        if (prevModel && prevModel.image_url !== newModelUrl) {
-          const oldStoragePath = extractStoragePath(prevModel.image_url);
-          if (oldStoragePath) {
-            await supabase.storage.from("models").remove([oldStoragePath]);
-          }
+        const formData = new FormData();
+        formData.append('name', `${newModelGender === "female" ? "여성" : "남성"}`);
+        formData.append('description', newModelDesc);
+        formData.append('gender', newModelGender === "female" ? "Female" : "Male");
+        if (newModelFile) {
+          formData.append('file', newModelFile);
         }
 
-        // 3. Update DB
-        const { data, error } = await supabase
-          .from("ai_models")
-          .update({
-            gender: newModelGender,
-            description: newModelDesc,
-            image_url: newModelUrl,
-          })
-          .eq("id", editingModelId)
-          .select()
-          .single();
-
-        if (error) throw error;
-
-        if (data) {
+        const token = localStorage.getItem('ncp_access_token');
+        const res = await axios.put(`/api/core/faceswap/models/${editingModelId}`, formData, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (res.data) {
+          const m = res.data;
+          const updatedModel = {
+            id: m.uid,
+            gender: m.gender?.toLowerCase() || newModelGender,
+            description: m.description || m.name || '',
+            name: m.name || '',
+            image_url: m.file?.details?.[0] ? `https://api.cubric.io/api/storage?fileName=${m.file.details[0]}` : newModelUrl,
+            is_active: true,
+            sort_order: 0,
+          };
           setAiModels((prev) =>
-            prev.map((m) => (m.id === editingModelId ? data : m)),
+            prev.map((item) => (item.id === editingModelId ? updatedModel : item)),
           );
           alert("모델 정보가 수정되었습니다.");
           resetForm();
         }
       } else {
-        // --- Create Mode ---
-        const { data, error } = await supabase
-          .from("ai_models")
-          .insert([
-            {
-              gender: newModelGender,
-              description: newModelDesc,
-              image_url: newModelUrl,
-              is_active: true,
-            },
-          ])
-          .select()
-          .single();
+        // --- Create Mode (Single File) ---
+        if (!newModelFile) {
+           alert("이미지 파일이 필요합니다. 이미지 URL 직접입력은 지원되지 않습니다.");
+           return;
+        }
 
-        if (error) throw error;
+        const formData = new FormData();
+        formData.append('name', `${newModelGender === "female" ? "여성" : "남성"}`);
+        formData.append('description', newModelDesc);
+        formData.append('gender', newModelGender === "female" ? "Female" : "Male");
+        formData.append('file', newModelFile);
 
-        if (data) {
-          setAiModels([data, ...aiModels]);
+        const token = localStorage.getItem('ncp_access_token');
+        const res = await axios.post(`/api/core/faceswap/upload`, formData, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (res.data) {
+          const m = res.data;
+          const newModel = {
+            id: m.uid,
+            gender: m.gender?.toLowerCase() || newModelGender,
+            description: m.description || m.name || '',
+            name: m.name || '',
+            image_url: m.file?.details?.[0] ? `https://api.cubric.io/api/storage?fileName=${m.file.details[0]}` : '',
+            is_active: true,
+            sort_order: 0,
+          };
+          setAiModels((prev) => [newModel, ...prev]);
           alert("모델이 성공적으로 등록되었습니다.");
           resetForm();
         }
       }
     } catch (err: any) {
       console.error("Error adding/updating model:", err);
-      alert("모델 저장 실패: " + err.message);
+      alert("모델 저장 실패: " + (err.response?.data?.message || err.message));
     } finally {
       setIsSubmittingModel(false);
     }
@@ -1428,19 +1554,8 @@ export default function AdminPage({ user }: { user: User | null }) {
       return;
 
     try {
-      // 1. Storage에 업로드된 이미지인 경우 파일 삭제
-      const storagePath = extractStoragePath(model.image_url);
-      if (storagePath) {
-        await supabase.storage.from("models").remove([storagePath]);
-      }
-
-      // 2. DB에서 레코드 삭제
-      const { error } = await supabase
-        .from("ai_models")
-        .delete()
-        .eq("id", model.id);
-
-      if (error) throw error;
+      const token = localStorage.getItem('ncp_access_token');
+      await axios.delete(`/api/core/faceswap/models/${model.id}`, { headers: { 'Authorization': `Bearer ${token}` }});
       setAiModels((prev) => prev.filter((m) => m.id !== model.id));
       setSelectedModelIds((prev) => prev.filter((id) => id !== model.id));
     } catch (err: any) {
@@ -1459,26 +1574,21 @@ export default function AdminPage({ user }: { user: User | null }) {
       return;
 
     try {
-      const modelsToDelete = aiModels.filter((m) =>
-        selectedModelIds.includes(m.id),
-      );
-      const paths = modelsToDelete
-        .map((m) => extractStoragePath(m.image_url))
-        .filter(Boolean) as string[];
-      if (paths.length > 0) {
-        await supabase.storage.from("models").remove(paths);
+      const token = localStorage.getItem('ncp_access_token');
+      for (const uid of selectedModelIds) {
+         try {
+           await axios.delete(`/api/core/faceswap/models/${uid}`, { headers: { 'Authorization': `Bearer ${token}` } });
+         } catch(e) {
+           console.error(`Failed to delete model ${uid}`, e);
+         }
       }
-
-      const { error } = await supabase
-        .from("ai_models")
-        .delete()
-        .in("id", selectedModelIds);
-      if (error) throw error;
 
       setAiModels((prev) =>
         prev.filter((m) => !selectedModelIds.includes(m.id)),
       );
       setSelectedModelIds([]);
+      // Refresh to ensure strictly what server sees
+      setTimeout(() => fetchData(), 500);
     } catch (err) {
       console.error(err);
       alert("일괄 삭제 실패");
@@ -1495,11 +1605,21 @@ export default function AdminPage({ user }: { user: User | null }) {
       return;
 
     try {
-      const { error } = await supabase
-        .from("ai_models")
-        .update({ gender: newGender })
-        .in("id", selectedModelIds);
-      if (error) throw error;
+      const token = localStorage.getItem('ncp_access_token');
+      const modelsToUpdate = aiModels.filter((m) => selectedModelIds.includes(m.id));
+      for (const m of modelsToUpdate) {
+         const formData = new FormData();
+         formData.append('gender', newGender === "female" ? "Female" : "Male");
+         formData.append('name', m.name || (m.gender === "female" ? "여성" : "남성"));
+         formData.append('description', m.description || "");
+         try {
+            await axios.put(`/api/core/faceswap/models/${m.id}`, formData, {
+               headers: { 'Authorization': `Bearer ${token}` }
+            });
+         } catch(e) {
+            console.error(`Failed to update category for ${m.id}`, e);
+         }
+      }
 
       setAiModels((prev) =>
         prev.map((m) =>
@@ -1508,6 +1628,7 @@ export default function AdminPage({ user }: { user: User | null }) {
       );
       setSelectedModelIds([]);
       alert("카테고리가 변경되었습니다.");
+      setTimeout(() => fetchData(), 500);
     } catch (err) {
       console.error(err);
       alert("일괄 카테고리 변경 실패");
@@ -1732,23 +1853,9 @@ export default function AdminPage({ user }: { user: User | null }) {
         const oldIndex = items.findIndex((i) => i.id === active.id);
         const newIndex = items.findIndex((i) => i.id === over.id);
         const newArray = arrayMove(items, oldIndex, newIndex) as AiModel[];
-
-        const updates = newArray.map((m, index) => ({
-          id: m.id,
-          sort_order: index,
-        }));
-        // Update DB gracefully (we suppress errors mostly, just firing background updates)
-        Promise.all(
-          updates.map((u) =>
-            supabase
-              .from("ai_models")
-              .update({ sort_order: u.sort_order })
-              .eq("id", u.id),
-          ),
-        ).catch((e) =>
-          console.warn("Sort update error (maybe column missing):", e),
-        );
-
+        
+        // Note: NCP API currently doesn't support 'sort_order' updates
+        // So we just update the UI state locally
         return newArray;
       });
     }
@@ -2904,7 +3011,7 @@ export default function AdminPage({ user }: { user: User | null }) {
                               <div className="flex items-center justify-end gap-2">
                                 <button
                                   title="디자이너 추가 정보"
-                                  onClick={() => fetchDesignerDetail(profile.id)}
+                                  onClick={() => fetchDesignerDetail(profile)}
                                   className="text-blue-500 hover:text-blue-700 p-2 hover:bg-blue-50 rounded-lg transition-colors"
                                 >
                                   <UserCircle className="w-4 h-4" />
@@ -3983,46 +4090,87 @@ export default function AdminPage({ user }: { user: User | null }) {
                                   {selectedDesignerDetail.mobileNumber || selectedDesignerDetail.phone || '등록 안됨'}
                                 </p>
                             </div>
+                            <div className="grid grid-cols-2 gap-4">
+                               <div>
+                                   <p className="text-xs text-gray-500 font-bold mb-1">직급</p>
+                                   <p className="text-sm text-gray-900 font-medium bg-gray-50 p-3 rounded-xl border border-gray-100">
+                                     {selectedDesignerDetail.role || selectedDesignerDetail.position || '미등록'}
+                                   </p>
+                               </div>
+                               <div>
+                                   <p className="text-xs text-gray-500 font-bold mb-1">경력</p>
+                                   <p className="text-sm text-gray-900 font-medium bg-gray-50 p-3 rounded-xl border border-gray-100">
+                                     {selectedDesignerDetail.career || selectedDesignerDetail.careerYears ? `${selectedDesignerDetail.career || selectedDesignerDetail.careerYears}년` : '미등록'}
+                                   </p>
+                               </div>
+                            </div>
+                            <div>
+                                <p className="text-xs text-gray-500 font-bold mb-1">매장명</p>
+                                <p className="text-sm text-gray-900 font-medium bg-gray-50 p-3 rounded-xl border border-gray-100">
+                                  {selectedDesignerDetail.hairShop?.name || selectedDesignerDetail.hairShopName || '미등록'}
+                                </p>
+                            </div>
+                            <div>
+                                <p className="text-xs text-gray-500 font-bold mb-1">매장 주소</p>
+                                <p className="text-sm text-gray-900 font-medium bg-gray-50 p-3 rounded-xl border border-gray-100">
+                                  {selectedDesignerDetail.hairShop?.roadAddress || selectedDesignerDetail.hairShop?.address || '미등록'}
+                                </p>
+                            </div>
                             <div>
                                 <p className="text-xs text-gray-500 font-bold mb-1">소개글</p>
                                 <p className="text-sm text-gray-900 font-medium bg-gray-50 p-3 rounded-xl border border-gray-100 whitespace-pre-wrap min-h-[80px]">
-                                  {selectedDesignerDetail.introduction || '없음'}
+                                  {selectedDesignerDetail.introduce || selectedDesignerDetail.introduction || '없음'}
                                 </p>
                             </div>
                         </div>
                     </div>
                     <div>
-                         <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest mb-4">약관 동의</h3>
-                         <div className="space-y-3">
-                             <div className="flex items-center justify-between p-3 rounded-xl border border-gray-100 bg-white">
-                                 <span className="text-sm font-bold text-gray-700">AI 이미지 동의</span>
-                                 <span className={`text-xs font-bold px-2 py-1 rounded-md ${selectedDesignerDetail.aiImageAgreement || selectedDesignerDetail.ai_image_agreement ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                                     {selectedDesignerDetail.aiImageAgreement || selectedDesignerDetail.ai_image_agreement ? '동의' : '미동의'}
-                                 </span>
-                             </div>
-                             <div className="flex items-center justify-between p-3 rounded-xl border border-gray-100 bg-white">
-                                 <span className="text-sm font-bold text-gray-700">AI 영상(Video) 동의</span>
-                                 <span className={`text-xs font-bold px-2 py-1 rounded-md ${selectedDesignerDetail.aiVideoAgreement || selectedDesignerDetail.ai_video_agreement ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                                     {selectedDesignerDetail.aiVideoAgreement || selectedDesignerDetail.ai_video_agreement ? '동의' : '미동의'}
-                                 </span>
-                             </div>
-                             <div className="flex items-center justify-between p-3 rounded-xl border border-gray-100 bg-white">
-                                 <span className="text-sm font-bold text-gray-700">마케팅 수신 동의</span>
-                                 <span className={`text-xs font-bold px-2 py-1 rounded-md ${selectedDesignerDetail.marketingConsent || selectedDesignerDetail.marketing_consent ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                                     {selectedDesignerDetail.marketingConsent || selectedDesignerDetail.marketing_consent ? '동의' : '미동의'}
-                                 </span>
-                             </div>
-                         </div>
-
-                         <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest mb-4 mt-8">영업/휴무 정보</h3>
-                         <div className="space-y-4 bg-white p-4 rounded-xl border border-gray-100">
+                         <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest mb-4">영업/휴무 정보</h3>
+                         <div className="space-y-4 bg-white p-4 rounded-xl border border-gray-100 mb-8 max-h-[160px] overflow-y-auto">
                              <div>
-                               <span className="text-xs text-gray-500 font-bold">영업시간: </span>
-                               <span className="text-sm font-medium">{selectedDesignerDetail.businessHours || selectedDesignerDetail.business_hours || '정보 없음'}</span>
+                               <span className="text-xs text-gray-500 font-bold block mb-2">영업시간</span>
+                               {selectedDesignerDetail.businessTimes && Array.isArray(selectedDesignerDetail.businessTimes) ? (
+                                 <div className="space-y-1">
+                                   {selectedDesignerDetail.businessTimes.map((bt: any, idx: number) => {
+                                     const days = ['일', '월', '화', '수', '목', '금', '토'];
+                                     if (!bt) return <div key={idx} className="text-sm text-gray-500">{days[idx]}: 휴무</div>;
+                                     try {
+                                       const start = new Date(bt.startedAt || bt.startTime).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Seoul' });
+                                       const end = new Date(bt.endedAt || bt.endTime).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Seoul' });
+                                       return <div key={idx} className="text-sm font-medium">{days[idx]}: {start} ~ {end}</div>;
+                                     } catch(e) {
+                                       return <div key={idx} className="text-sm font-medium">{days[idx]}: 형식 오류</div>;
+                                     }
+                                   })}
+                                 </div>
+                               ) : (
+                                 <span className="text-sm font-medium">{selectedDesignerDetail.businessHours || selectedDesignerDetail.business_hours || '정보 없음'}</span>
+                               )}
                              </div>
                              <div>
                                <span className="text-xs text-gray-500 font-bold">정기휴무: </span>
-                               <span className="text-sm font-medium">{selectedDesignerDetail.holiday || '정보 없음'}</span>
+                               <span className="text-sm font-medium">
+                                 {selectedDesignerDetail.holidays && selectedDesignerDetail.holidays.length > 0
+                                   ? selectedDesignerDetail.holidays.map((h: any) => h.dayOfWeek || h).join(', ')
+                                   : (selectedDesignerDetail.holiday || '휴무 없음')}
+                               </span>
+                             </div>
+                         </div>
+                         
+                         <div className="flex items-center justify-between mb-4">
+                           <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest">총 보유 크레딧</h3>
+                         </div>
+                         <div className="bg-white p-4 rounded-xl border border-gray-100 mb-8 flex items-center justify-between">
+                            <span className="text-sm font-bold text-gray-500">잔여 크레딧</span>
+                            <span className="text-lg font-bold text-indigo-600">
+                               {selectedDesignerDetail.credit ?? selectedDesignerDetail.credits ?? 0} CR
+                            </span>
+                         </div>
+
+                         <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest mb-4">약관 동의</h3>
+                         <div className="space-y-3">
+                             <div className="text-xs text-gray-500 text-center py-4 bg-gray-50 rounded-xl border border-gray-100">
+                               관리자 API에서 세부 약관 동의 내역을 제공하지 않습니다.
                              </div>
                          </div>
                     </div>
