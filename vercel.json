@@ -1,6 +1,18 @@
 {
   "rewrites": [
     {
+      "source": "/api/account/:match*",
+      "destination": "http://account.cubric.io/api/account/:match*"
+    },
+    {
+      "source": "/api/designer/:match*",
+      "destination": "http://hairdeal.cubric.io/api/designer/:match*"
+    },
+    {
+      "source": "/api/admin/:match*",
+      "destination": "http://hairdeal.cubric.io/api/admin/:match*"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

@@ -13,6 +13,7 @@ import { motion } from 'motion/react';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useSiteContext } from './context/SiteContext';
 import { defaultSiteSettings } from './lib/siteSettings';
+import { syncNcpProfile } from './lib/syncNcp';
 import AiHairModelPage from './pages/AiHairModelPage';
 import AiHairModelAppPage from './pages/AiHairModelAppPage';
 import AdminPage from './pages/AdminPage'; // Import AdminPage
@@ -664,6 +665,12 @@ function AppContent() {
                if (e?.message !== 'Failed to fetch' && e?.message !== 'FetchError') {
                  console.error("Login history logging failed:", e);
                }
+             }
+
+             // If this was an OAuth login (or any login) and we don't have an NCP token yet, sync it!
+             if (!localStorage.getItem('ncp_access_token')) {
+               console.log("Supabase signed in but no NCP token found, syncing NCP profile...");
+               await syncNcpProfile(currentUser);
              }
           }
         };
