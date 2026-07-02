@@ -344,28 +344,32 @@ async function startServer() {
   // ==============================================================================
 
   // Initialize Supabase Admin client securely using service_role or master key
-  const supabaseUrlForSync = process.env.VITE_SUPABASE_URL || '';
-  const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-  if (!supabaseServiceRoleKey) {
-    console.error('[CRITICAL] SUPABASE_SERVICE_ROLE_KEY is not set!');
-  }
-  const supabaseAdmin = (supabaseUrlForSync && supabaseServiceRoleKey)
-    ? createClient(supabaseUrlForSync, supabaseServiceRoleKey, {
-        auth: {
-          persistSession: false,
-          autoRefreshToken: false
-        }
-      })
-    : null;
+  const getSupabaseAdmin = () => {
+    const getSupabaseEnv = (key: string) => (process.env[key] || process.env[`VITE_${key}`] || '').trim();
+    const supabaseUrlForSync = getSupabaseEnv('SUPABASE_URL');
+    const supabaseServiceRoleKey = getSupabaseEnv('SUPABASE_SERVICE_ROLE_KEY');
+    
+    if (!supabaseUrlForSync || !supabaseServiceRoleKey) {
+      console.error('[CRITICAL] SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is not set!');
+      return null;
+    }
+    
+    return createClient(supabaseUrlForSync, supabaseServiceRoleKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false
+      }
+    });
+  };
 
   // Token Verification utility for NCP tokens
   const getDesignerByToken = async (token: string) => {
     if (!token || token === 'null' || token === 'undefined') return null;
     
     // 1. Supabase validation
-    if (supabaseAdmin) {
+    if (getSupabaseAdmin()) {
       try {
-        const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+        const { data: { user }, error } = await getSupabaseAdmin().auth.getUser(token);
         if (!error && user) {
           return { 
             id: user.id, 
@@ -423,9 +427,9 @@ async function startServer() {
 
     const uuid = mapNcpIdToUuid(designer);
     if (!uuid) return null;
-    if (designer.email && supabaseAdmin) {
+    if (designer.email && getSupabaseAdmin()) {
       try {
-        const { data: matchedProfile } = await supabaseAdmin
+        const { data: matchedProfile } = await getSupabaseAdmin()
           .from('profiles')
           .select('id')
           .eq('email', designer.email)
@@ -441,7 +445,7 @@ async function startServer() {
   };
 
   const authenticateIncomingRequest = async (req: express.Request) => {
-    if (!supabaseAdmin) {
+    if (!getSupabaseAdmin()) {
       console.error("[authenticateIncomingRequest] Supabase admin client not initialized correctly!");
       return null;
     }
@@ -529,7 +533,7 @@ async function startServer() {
 
     // 2. Try standard Supabase authentication
     try {
-      const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+      const { data: { user }, error } = await getSupabaseAdmin().auth.getUser(token);
       if (user && !error) {
         return {
           userId: user.id,
@@ -563,7 +567,7 @@ async function startServer() {
   };
 
   const handleSocialLoginSuccess = async (res: any, provider: string, profile: any) => {
-    if (!supabaseAdmin) return res.status(500).json({ error: 'Supabase admin not configured' });
+    if (!getSupabaseAdmin()) return res.status(500).json({ error: 'Supabase admin not configured' });
     
     try {
       const rawEmail = profile.email || `${profile.id}@${provider}.social`;
@@ -713,19 +717,19 @@ async function startServer() {
 
       // 4. Synchronize 1:1 with Supabase Auth & Profile database
       let userId = '';
-      const { data: matchedProfile } = await supabaseAdmin.from('profiles').select('id').eq('email', finalEmail).maybeSingle();
+      const { data: matchedProfile } = await getSupabaseAdmin().from('profiles').select('id').eq('email', finalEmail).maybeSingle();
       
       if (matchedProfile && (matchedProfile as any).id) {
         userId = (matchedProfile as any).id;
         console.log(`[SocialSync] Found existing Supabase profile with email ${finalEmail}: ${userId}`);
-        await supabaseAdmin.auth.admin.updateUserById(userId, { 
+        await getSupabaseAdmin().auth.admin.updateUserById(userId, { 
           password: password,
           user_metadata: { full_name: finalName, phone: finalPhone, provider }
         });
       } else {
         console.log(`[SocialSync] Registering new Supabase Auth User with 1:1 matched UUID: ${formattedUuid}`);
         try {
-          const { data, error } = await supabaseAdmin.auth.admin.createUser({
+          const { data, error } = await getSupabaseAdmin().auth.admin.createUser({
             id: formattedUuid,
             email: finalEmail,
             password: password,
@@ -734,7 +738,7 @@ async function startServer() {
           });
           if (error) {
             console.warn(`[SocialSync] Create with formattedUuid failed: ${error.message}. Falling back to random ID...`);
-            const { data: fallbackData, error: fallbackError } = await supabaseAdmin.auth.admin.createUser({
+            const { data: fallbackData, error: fallbackError } = await getSupabaseAdmin().auth.admin.createUser({
               email: finalEmail,
               password: password,
               email_confirm: true,
@@ -748,7 +752,7 @@ async function startServer() {
         } catch (authCreateErr: any) {
           console.error(`[SocialSync] Critical Auth User registration failure:`, authCreateErr.message);
           // Ultimate fallback
-          const { data: ultimateData } = await supabaseAdmin.auth.admin.listUsers();
+          const { data: ultimateData } = await getSupabaseAdmin().auth.admin.listUsers();
           const alreadyUser = ultimateData?.users?.find((u: any) => u.email?.toLowerCase() === finalEmail.toLowerCase());
           if (alreadyUser) {
             userId = alreadyUser.id;
@@ -1008,7 +1012,7 @@ async function startServer() {
 
   // Secure endpoint to update site settings (bypassing Client RLS issues)
   app.post('/api/admin/site-settings', async (req, res) => {
-    if (!supabaseAdmin) {
+    if (!getSupabaseAdmin()) {
       return res.status(500).json({ error: 'Supabase admin client not initialized' });
     }
 
@@ -1051,7 +1055,7 @@ async function startServer() {
         
         let isSystemAdminRole = false;
         try {
-          const { data: profile } = await supabaseAdmin
+          const { data: profile } = await getSupabaseAdmin()
             .from('profiles')
             .select('role')
             .eq('id', authInfo.userId)
@@ -1102,7 +1106,7 @@ async function startServer() {
         updatePayload.toss_secret_key = tossSecretKey;
       }
 
-      const { error } = await supabaseAdmin
+      const { error } = await getSupabaseAdmin()
         .from('site_settings')
         .upsert(updatePayload, { onConflict: 'id' });
 
@@ -1120,7 +1124,7 @@ async function startServer() {
 
   // Secure endpoint to check/ensure profile exists and reward Referrers (handles RLS-unauthenticated NCP clients too)
   app.post('/api/credits/ensure-profile', async (req, res) => {
-    if (!supabaseAdmin) return res.status(500).json({ error: 'Supabase admin client not ready to process request' });
+    if (!getSupabaseAdmin()) return res.status(500).json({ error: 'Supabase admin client not ready to process request' });
 
     try {
       const authInfo = await authenticateIncomingRequest(req);
@@ -1147,7 +1151,7 @@ async function startServer() {
       // If we STILL don't have a valid email, try looking up auth.users by ID (as AuthModal likely saved the right email there during signup)
       if (!resolvedEmail || resolvedEmail.endsWith('@ncp.local')) {
         try {
-          const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(finalUserId);
+          const { data: authUser } = await getSupabaseAdmin().auth.admin.getUserById(finalUserId);
           if (authUser?.user?.email && !authUser.user.email.endsWith('@ncp.local')) {
             resolvedEmail = authUser.user.email;
           }
@@ -1161,7 +1165,7 @@ async function startServer() {
       if (searchEmail) {
         try {
           // A. First try to align with an existing public profile by email (extremely robust and bypasses auth.admin service limits!)
-          const { data: matchedProfile } = await supabaseAdmin
+          const { data: matchedProfile } = await getSupabaseAdmin()
             .from('profiles')
             .select('id')
             .eq('email', searchEmail.toLowerCase())
@@ -1172,7 +1176,7 @@ async function startServer() {
             finalUserId = matchedProfile.id;
           } else {
             // B. Fallback to listUsers list and find matching email
-            const { data: listData } = await supabaseAdmin.auth.admin.listUsers();
+            const { data: listData } = await getSupabaseAdmin().auth.admin.listUsers();
             const matchedUser = listData?.users?.find(
               (u: any) => u.email?.toLowerCase() === searchEmail.toLowerCase()
             );
@@ -1187,7 +1191,7 @@ async function startServer() {
       }
 
       // 1. Fetch current profile status
-      const { data: existingProfile, error: queryError } = await supabaseAdmin
+      const { data: existingProfile, error: queryError } = await getSupabaseAdmin()
         .from('profiles')
         .select('id')
         .eq('id', finalUserId)
@@ -1211,7 +1215,7 @@ async function startServer() {
         }
         if (ncpAvatarUrl) {
           try {
-            await supabaseAdmin.auth.admin.updateUserById(finalUserId, {
+            await getSupabaseAdmin().auth.admin.updateUserById(finalUserId, {
               user_metadata: { avatar_url: ncpAvatarUrl }
             });
             console.log(`[ensure-profile] Synchronized user metadata avatar_url for ${finalUserId}:`, ncpAvatarUrl);
@@ -1221,7 +1225,7 @@ async function startServer() {
         }
 
         if (Object.keys(updateData).length > 0) {
-          await supabaseAdmin.from('profiles').update(updateData).eq('id', finalUserId);
+          await getSupabaseAdmin().from('profiles').update(updateData).eq('id', finalUserId);
           console.log(`[ensure-profile] Synchronized existing profile ${finalUserId} with live NCP data:`, updateData);
         }
         return res.json({ ok: true, isNew: false, profileId: existingProfile.id });
@@ -1234,7 +1238,7 @@ async function startServer() {
       try {
         let authUser: any = null;
         // Check by ID first
-        const { data: userData } = await supabaseAdmin.auth.admin.getUserById(finalUserId);
+        const { data: userData } = await getSupabaseAdmin().auth.admin.getUserById(finalUserId);
         if (userData?.user) {
           authUser = userData.user;
         } else {
@@ -1248,7 +1252,7 @@ async function startServer() {
             .replace(/@hanmail\.co$/, '@hanmail.net');
 
           if (normalizedEmail && !normalizedEmail.endsWith('@ncp.local')) {
-            const { data: listData } = await supabaseAdmin.auth.admin.listUsers();
+            const { data: listData } = await getSupabaseAdmin().auth.admin.listUsers();
             const matchedUser = listData?.users?.find(
               (u: any) => u.email?.toLowerCase() === normalizedEmail
             );
@@ -1272,7 +1276,7 @@ async function startServer() {
             .replace(/@daum\.co$/, '@daum.net')
             .replace(/@hanmail\.co$/, '@hanmail.net');
 
-          let { error: createUserError } = await supabaseAdmin.auth.admin.createUser({
+          let { error: createUserError } = await getSupabaseAdmin().auth.admin.createUser({
             id: finalUserId,
             email: normalizedEmail,
             email_confirm: true,
@@ -1284,7 +1288,7 @@ async function startServer() {
           if (createUserError) {
             console.warn(`[ensure-profile] First dynamic auth.user creation failed (${createUserError.message}), trying fallback email...`);
             const fallbackEmail = `${finalUserId}@ncp.local`;
-            const retryRes = await supabaseAdmin.auth.admin.createUser({
+            const retryRes = await getSupabaseAdmin().auth.admin.createUser({
               id: finalUserId,
               email: fallbackEmail,
               email_confirm: true,
@@ -1306,7 +1310,7 @@ async function startServer() {
 
       let referredBy: string | null = null;
       if (referralCode) {
-        const { data: refData } = await supabaseAdmin
+        const { data: refData } = await getSupabaseAdmin()
           .from('profiles')
           .select('id')
           .eq('referral_code', referralCode)
@@ -1317,7 +1321,7 @@ async function startServer() {
       const generatedCode = ncpReferralCode || Buffer.from(finalUserId.replace(/-/g, '')).toString('base64').substring(0, 8).toUpperCase();
 
       // Ensure we supply defaults/fallbacks for crucial tables columns like is_blacklisted: false, role: 'user', and is_admin: false
-      const { error: insertError } = await supabaseAdmin.from('profiles').upsert({
+      const { error: insertError } = await getSupabaseAdmin().from('profiles').upsert({
         id: finalUserId,
         email: resolvedEmail,
         full_name: resolvedName,
@@ -1337,7 +1341,7 @@ async function startServer() {
 
       if (ncpAvatarUrl) {
         try {
-          await supabaseAdmin.auth.admin.updateUserById(finalUserId, {
+          await getSupabaseAdmin().auth.admin.updateUserById(finalUserId, {
             user_metadata: { avatar_url: ncpAvatarUrl }
           });
           console.log(`[ensure-profile] Added user metadata avatar_url on creation for ${finalUserId}:`, ncpAvatarUrl);
@@ -1349,7 +1353,7 @@ async function startServer() {
       // 3. Process referral systems in single transaction
       if (referredBy) {
         // Log the referral mission
-        await supabaseAdmin.from('referral_missions').insert([{
+        await getSupabaseAdmin().from('referral_missions').insert([{
           referrer_id: referredBy,
           referred_id: finalUserId,
           status: 'signup'
@@ -1358,15 +1362,15 @@ async function startServer() {
         // Reward metrics determination
         let signUpReward = 20;
         try {
-          const { data: metrics } = await supabaseAdmin.from('app_metrics').select('referral_signup_reward').eq('id', 1).single();
+          const { data: metrics } = await getSupabaseAdmin().from('app_metrics').select('referral_signup_reward').eq('id', 1).single();
           if (metrics?.referral_signup_reward) signUpReward = metrics.referral_signup_reward;
         } catch (metricsErr) {
           console.warn("[ensure-profile] Failed reading referral metrics, using backup value:", metricsErr);
         }
 
         // Atomically increase referred account credit and log transaction details
-        await supabaseAdmin.rpc('increment_credits', { user_id: referredBy, amount: signUpReward });
-        await supabaseAdmin.from('credit_transactions').insert([{
+        await getSupabaseAdmin().rpc('increment_credits', { user_id: referredBy, amount: signUpReward });
+        await getSupabaseAdmin().from('credit_transactions').insert([{
           user_id: referredBy,
           type: 'earned',
           amount: signUpReward,
@@ -1383,7 +1387,7 @@ async function startServer() {
 
   // Secure Welcome credit reward dispatcher (fully handles atomic balance increment and prevents double payments)
   app.post('/api/credits/welcome-reward', async (req, res) => {
-    if (!supabaseAdmin) return res.status(500).json({ error: 'Supabase admin is not set up' });
+    if (!getSupabaseAdmin()) return res.status(500).json({ error: 'Supabase admin is not set up' });
 
     try {
       const authInfo = await authenticateIncomingRequest(req);
@@ -1392,7 +1396,7 @@ async function startServer() {
       const { userId } = authInfo;
 
       // 1. Prevent duplicate payments via server database constraint checks
-      const { data: existingTx } = await supabaseAdmin
+      const { data: existingTx } = await getSupabaseAdmin()
         .from('credit_transactions')
         .select('id')
         .eq('user_id', userId)
@@ -1405,15 +1409,15 @@ async function startServer() {
       }
 
       // 2. Fetch configured reward size
-      const { data: metrics } = await supabaseAdmin.from('app_metrics').select('welcome_credit_reward').eq('id', 1).single();
+      const { data: metrics } = await getSupabaseAdmin().from('app_metrics').select('welcome_credit_reward').eq('id', 1).single();
       const rewardAmount = metrics?.welcome_credit_reward;
       if (!rewardAmount) {
         return res.status(400).json({ error: '기본 보상 정책(app_metrics.welcome_credit_reward)이 유효하지 않습니다.' });
       }
 
       // 3. Atomically add credits and log transaction receipt
-      await supabaseAdmin.rpc('increment_credits', { user_id: userId, amount: rewardAmount });
-      await supabaseAdmin.from('credit_transactions').insert([{
+      await getSupabaseAdmin().rpc('increment_credits', { user_id: userId, amount: rewardAmount });
+      await getSupabaseAdmin().from('credit_transactions').insert([{
         user_id: userId,
         type: 'earned',
         amount: rewardAmount,
@@ -1429,7 +1433,7 @@ async function startServer() {
 
   // Secure daily attendance check reward dispatcher (prevent race conditions via atomic increments)
   app.post('/api/credits/daily-reward', async (req, res) => {
-    if (!supabaseAdmin) return res.status(500).json({ error: 'Supabase admin is not set up' });
+    if (!getSupabaseAdmin()) return res.status(500).json({ error: 'Supabase admin is not set up' });
 
     try {
       const authInfo = await authenticateIncomingRequest(req);
@@ -1451,7 +1455,7 @@ async function startServer() {
       const kstEnd = new Date(kstStart.getTime() + 24 * 60 * 60 * 1000 - 1);
 
       // 2. Search index within local timeline
-      const { data: existingTxs } = await supabaseAdmin
+      const { data: existingTxs } = await getSupabaseAdmin()
         .from('credit_transactions')
         .select('id')
         .eq('user_id', userId)
@@ -1465,15 +1469,15 @@ async function startServer() {
       }
 
       // 3. Fetch app configured values
-      const { data: metrics } = await supabaseAdmin.from('app_metrics').select('daily_credit_reward').eq('id', 1).single();
+      const { data: metrics } = await getSupabaseAdmin().from('app_metrics').select('daily_credit_reward').eq('id', 1).single();
       const rewardAmount = metrics?.daily_credit_reward;
       if (!rewardAmount) {
         return res.status(400).json({ error: '출석체크 크레딧 지급액(app_metrics.daily_credit_reward) 설정 오류가 감지되었습니다.' });
       }
 
       // 4. Force atomic update on target profile and record invoice
-      await supabaseAdmin.rpc('increment_credits', { user_id: userId, amount: rewardAmount });
-      await supabaseAdmin.from('credit_transactions').insert([{
+      await getSupabaseAdmin().rpc('increment_credits', { user_id: userId, amount: rewardAmount });
+      await getSupabaseAdmin().from('credit_transactions').insert([{
         user_id: userId,
         type: 'earned',
         amount: rewardAmount,
@@ -1669,7 +1673,7 @@ async function startServer() {
       // 1. Supabase에서 오늘 결제해야 할 구독 목록 가져오기 (Service Role Key 필요. 여기서는 시뮬레이션으로 생략 또는 간단한 Fetch)
       // * 실제 운영 환경: Supabase Admin Key를 사용해 user_subscriptions 테이블을 조회합니다.
       // const today = new Date().toISOString();
-      // const { data: subs } = await supabaseAdmin.from('user_subscriptions')
+      // const { data: subs } = await getSupabaseAdmin().from('user_subscriptions')
       //    .select(`*, profiles(billing_key)`)
       //    .eq('status', 'active')
       //    .eq('auto_renew', true)
@@ -1698,7 +1702,7 @@ async function startServer() {
           
           if (response.ok) {
             // 결제 성공 -> 다음 결제일 1달 뒤로 갱신
-            // await supabaseAdmin.from('user_subscriptions').update({
+            // await getSupabaseAdmin().from('user_subscriptions').update({
             //   last_billing_date: new Date().toISOString(),
             //   next_billing_date: new Date(new Date().setMonth(new Date().getMonth() + 1)).toISOString()
             // }).eq('id', sub.id);
