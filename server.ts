@@ -1,8 +1,6 @@
 import crypto from "crypto";
 import express from "express";
-import { createServer as createViteServer } from "vite";
 import path from "path";
-import { fileURLToPath } from "url";
 import * as dotenv from 'dotenv';
 import cors from 'cors';
 import webpush from 'web-push';
@@ -13,9 +11,6 @@ import jwt from 'jsonwebtoken';
 import fs from 'fs';
 
 dotenv.config();
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 // Initialize Web Push
 // Generate VAPID keys if not set in env: `npx web-push generate-vapid-keys`
@@ -1962,13 +1957,15 @@ ${platforms.includes('instagram') ? '  "instagram": "인스타그램 내용",\n'
 
   if (process.env.VERCEL !== '1') {
     if (process.env.NODE_ENV !== "production") {
+      const viteModule = "vite";
+      const { createServer: createViteServer } = await import(viteModule);
       const vite = await createViteServer({
         server: { middlewareMode: true },
         appType: "spa",
       });
       app.use(vite.middlewares);
     } else {
-      const distPath = path.join(__dirname, "dist");
+      const distPath = path.join(process.cwd(), "dist");
       app.use(express.static(distPath));
       app.get("*", (req, res) => {
         res.sendFile(path.join(distPath, "index.html"));
