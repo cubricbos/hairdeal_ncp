@@ -827,9 +827,11 @@ async function startServer() {
     return `${protocol}://${host}`;
   };
 
+  const getOAuthEnv = (key: string) => (process.env[key] || process.env[`VITE_${key}`] || '').trim();
+
   // NAVER OAUTH
   app.get('/api/auth/naver/login', (req, res) => {
-    const clientId = process.env.NAVER_CLIENT_ID;
+    const clientId = getOAuthEnv('NAVER_CLIENT_ID');
     const redirectUri = `${getBaseUrl(req)}/api/auth/naver/callback`;
     const state = Math.random().toString(36).substring(7);
     const url = `https://nid.naver.com/oauth2.0/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`;
@@ -838,8 +840,8 @@ async function startServer() {
 
   app.get('/api/auth/naver/callback', async (req, res) => {
     const { code, state } = req.query;
-    const clientId = process.env.NAVER_CLIENT_ID;
-    const clientSecret = process.env.NAVER_CLIENT_SECRET;
+    const clientId = getOAuthEnv('NAVER_CLIENT_ID');
+    const clientSecret = getOAuthEnv('NAVER_CLIENT_SECRET');
     const redirectUri = `${getBaseUrl(req)}/api/auth/naver/callback`;
 
     try {
@@ -870,7 +872,7 @@ async function startServer() {
 
   // KAKAO OAUTH
   app.get('/api/auth/kakao/login', (req, res) => {
-    const clientId = process.env.KAKAO_CLIENT_ID;
+    const clientId = getOAuthEnv('KAKAO_CLIENT_ID');
     const redirectUri = `${getBaseUrl(req)}/api/auth/kakao/callback`;
     const url = `https://kauth.kakao.com/oauth/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}`;
     res.redirect(url);
@@ -878,8 +880,8 @@ async function startServer() {
 
   app.get('/api/auth/kakao/callback', async (req, res) => {
     const { code } = req.query;
-    const clientId = process.env.KAKAO_CLIENT_ID;
-    const clientSecret = process.env.KAKAO_CLIENT_SECRET || ''; // Optional in Kakao depending on settings
+    const clientId = getOAuthEnv('KAKAO_CLIENT_ID');
+    const clientSecret = getOAuthEnv('KAKAO_CLIENT_SECRET'); // Optional in Kakao depending on settings
     const redirectUri = `${getBaseUrl(req)}/api/auth/kakao/callback`;
 
     try {
@@ -918,7 +920,7 @@ async function startServer() {
 
   // GOOGLE OAUTH
   app.get('/api/auth/google/login', (req, res) => {
-    const clientId = process.env.GOOGLE_CLIENT_ID;
+    const clientId = getOAuthEnv('GOOGLE_CLIENT_ID');
     const redirectUri = `${getBaseUrl(req)}/api/auth/google/callback`;
     const scope = 'email profile';
     const url = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}`;
@@ -927,8 +929,8 @@ async function startServer() {
 
   app.get('/api/auth/google/callback', async (req, res) => {
     const { code } = req.query;
-    const clientId = process.env.GOOGLE_CLIENT_ID;
-    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+    const clientId = getOAuthEnv('GOOGLE_CLIENT_ID');
+    const clientSecret = getOAuthEnv('GOOGLE_CLIENT_SECRET');
     const redirectUri = `${getBaseUrl(req)}/api/auth/google/callback`;
 
     try {
