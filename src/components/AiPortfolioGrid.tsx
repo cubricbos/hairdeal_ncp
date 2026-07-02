@@ -124,8 +124,10 @@ export default function AiPortfolioGrid({ user, avatarUrl, userName, onBack, onS
                 }).filter((item: any) => !!item.image_url);
                 setPortfolios(mappedItems);
             }
-        } catch (err) {
-            console.error("포트폴리오 조회 오류:", err);
+        } catch (err: any) {
+            if (err?.response?.status !== 500 && err?.response?.status !== 401 && err?.response?.status !== 403) {
+                console.error("포트폴리오 조회 오류:", err);
+            }
         } finally {
             setLoading(false);
         }

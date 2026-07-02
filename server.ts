@@ -389,6 +389,15 @@ async function startServer() {
         designerInfo = jwt.verify(token, secret);
       } catch (err) {
         designerInfo = jwt.decode(token);
+        if (!designerInfo) {
+          try {
+            const payloadB64 = token.split('.')[1];
+            if (payloadB64) {
+              const payloadStr = Buffer.from(payloadB64, 'base64').toString('utf-8');
+              designerInfo = JSON.parse(payloadStr);
+            }
+          } catch(e) {}
+        }
       }
 
       if (designerInfo && (designerInfo.id || designerInfo.sub)) {
@@ -527,7 +536,7 @@ async function startServer() {
         name: name,
         referralCode: referralCode,
         avatarUrl: ncpAvatarUrl || null,
-        isNcp: true
+        isNcp: ncpDesigner._auth_source !== 'supabase'
       };
     }
 
@@ -1028,12 +1037,23 @@ async function startServer() {
 
       // 1. Fallback: Decode token locally and authorize if it matches system administrator parameters
       const authHeader = req.headers.authorization;
+      console.log("[DEBUG /api/admin/site-settings] Auth Header:", authHeader?.substring(0, 30) + '...');
       if (authHeader) {
         const parts = authHeader.split(' ');
         const token = parts[1] || parts[0];
         if (token && token !== 'null' && token !== 'undefined') {
           try {
-            const decoded: any = jwt.decode(token);
+            let decoded: any = jwt.decode(token);
+            if (!decoded) {
+              try {
+                const payloadB64 = token.split('.')[1];
+                if (payloadB64) {
+                  const payloadStr = Buffer.from(payloadB64, 'base64').toString('utf-8');
+                  decoded = JSON.parse(payloadStr);
+                }
+              } catch(e) {}
+            }
+            console.log("[DEBUG /api/admin/site-settings] decoded.email:", decoded?.email, "decoded.id:", decoded?.id);
             if (decoded && (
               decoded.email?.toLowerCase().includes('cubric') || 
               decoded.email?.toLowerCase().includes('admin') ||
@@ -1049,28 +1069,29 @@ async function startServer() {
       }
 
       // 2. Standard flow validation
+      console.log("[DEBUG /api/admin/site-settings] authInfo:", authInfo);
       if (authInfo) {
         const isSystemAdminEmail = authInfo.email.toLowerCase() === 'cubric.ceo@gmail.com' || authInfo.email.toLowerCase().includes('cubric');
-        const isNcpAdmin = authInfo.isNcp === true;
         
         let isSystemAdminRole = false;
         try {
           const { data: profile } = await getSupabaseAdmin()
             .from('profiles')
-            .select('role')
+            .select('role, is_admin, is_cs_admin')
             .eq('id', authInfo.userId)
             .maybeSingle();
 
-          isSystemAdminRole = profile?.role === 'system_admin' || profile?.role === 'admin';
+          isSystemAdminRole = profile?.role === 'system_admin' || profile?.role === 'admin' || profile?.is_admin === true || profile?.is_cs_admin === true || profile?.role === 'operator';
         } catch (dbErr) {
           console.warn("[Site Settings Auth] Fallback profiles query error:", dbErr);
         }
 
-        if (isSystemAdminEmail || isSystemAdminRole || isNcpAdmin) {
+        if (isSystemAdminEmail || isSystemAdminRole) {
           isAuthorized = true;
         }
       }
 
+      console.log("[DEBUG /api/admin/site-settings] isAuthorized:", isAuthorized);
       if (!isAuthorized) {
         return res.status(403).json({ error: '관리자 권한이 필요합니다.' });
       }
