@@ -13,6 +13,10 @@
       "destination": "http://hairdeal.cubric.io/api/admin/:match*"
     },
     {
+      "source": "/api/(.*)",
+      "destination": "/api/index"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

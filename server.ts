@@ -56,8 +56,9 @@ async function getTossSecretKey() {
   return fallbackKey.trim();
 }
 
+const app = express();
+
 async function startServer() {
-  const app = express();
   const PORT = 3000;
 
   app.use(cors());
@@ -809,10 +810,32 @@ async function startServer() {
     }
   };
 
+  const getBaseUrl = (req: any) => {
+    if (process.env.PUBLIC_SITE_URL) return process.env.PUBLIC_SITE_URL;
+    if (process.env.VITE_PUBLIC_SITE_URL) return process.env.VITE_PUBLIC_SITE_URL;
+    
+    // Vercel specific host header
+    const vercelUrl = process.env.VERCEL_URL;
+    
+    const host = req.headers['x-forwarded-host'] || req.get('host');
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+    
+    // Explicit hardcode fallback for the known production domain
+    if (process.env.VERCEL === '1' || process.env.NODE_ENV === 'production') {
+      // Force hairdeal.io if we are on Vercel unless it's a specific Vercel preview URL
+      if (host && host.includes('vercel.app')) {
+        return `https://${host}`;
+      }
+      return 'https://hairdeal.io';
+    }
+    
+    return `${protocol}://${host}`;
+  };
+
   // NAVER OAUTH
   app.get('/api/auth/naver/login', (req, res) => {
     const clientId = process.env.NAVER_CLIENT_ID;
-    const redirectUri = `${req.protocol}://${req.get('host')}/api/auth/naver/callback`;
+    const redirectUri = `${getBaseUrl(req)}/api/auth/naver/callback`;
     const state = Math.random().toString(36).substring(7);
     const url = `https://nid.naver.com/oauth2.0/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`;
     res.redirect(url);
@@ -822,7 +845,7 @@ async function startServer() {
     const { code, state } = req.query;
     const clientId = process.env.NAVER_CLIENT_ID;
     const clientSecret = process.env.NAVER_CLIENT_SECRET;
-    const redirectUri = `${req.protocol}://${req.get('host')}/api/auth/naver/callback`;
+    const redirectUri = `${getBaseUrl(req)}/api/auth/naver/callback`;
 
     try {
       const tokenUrl = `https://nid.naver.com/oauth2.0/token?grant_type=authorization_code&client_id=${clientId}&client_secret=${clientSecret}&code=${code}&state=${state}`;
@@ -853,7 +876,7 @@ async function startServer() {
   // KAKAO OAUTH
   app.get('/api/auth/kakao/login', (req, res) => {
     const clientId = process.env.KAKAO_CLIENT_ID;
-    const redirectUri = `${req.protocol}://${req.get('host')}/api/auth/kakao/callback`;
+    const redirectUri = `${getBaseUrl(req)}/api/auth/kakao/callback`;
     const url = `https://kauth.kakao.com/oauth/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}`;
     res.redirect(url);
   });
@@ -862,7 +885,7 @@ async function startServer() {
     const { code } = req.query;
     const clientId = process.env.KAKAO_CLIENT_ID;
     const clientSecret = process.env.KAKAO_CLIENT_SECRET || ''; // Optional in Kakao depending on settings
-    const redirectUri = `${req.protocol}://${req.get('host')}/api/auth/kakao/callback`;
+    const redirectUri = `${getBaseUrl(req)}/api/auth/kakao/callback`;
 
     try {
       const params = new URLSearchParams();
@@ -901,7 +924,7 @@ async function startServer() {
   // GOOGLE OAUTH
   app.get('/api/auth/google/login', (req, res) => {
     const clientId = process.env.GOOGLE_CLIENT_ID;
-    const redirectUri = `${req.protocol}://${req.get('host')}/api/auth/google/callback`;
+    const redirectUri = `${getBaseUrl(req)}/api/auth/google/callback`;
     const scope = 'email profile';
     const url = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}`;
     res.redirect(url);
@@ -911,7 +934,7 @@ async function startServer() {
     const { code } = req.query;
     const clientId = process.env.GOOGLE_CLIENT_ID;
     const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-    const redirectUri = `${req.protocol}://${req.get('host')}/api/auth/google/callback`;
+    const redirectUri = `${getBaseUrl(req)}/api/auth/google/callback`;
 
     try {
       const params = new URLSearchParams();
@@ -1937,23 +1960,29 @@ ${platforms.includes('instagram') ? '  "instagram": "인스타그램 내용",\n'
     res.status(404).json({ message: `API route ${req.method} ${req.path} not found` });
   });
 
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(__dirname, "dist");
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
+  if (process.env.VERCEL !== '1') {
+    if (process.env.NODE_ENV !== "production") {
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: "spa",
+      });
+      app.use(vite.middlewares);
+    } else {
+      const distPath = path.join(__dirname, "dist");
+      app.use(express.static(distPath));
+      app.get("*", (req, res) => {
+        res.sendFile(path.join(distPath, "index.html"));
+      });
+    }
+
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server running on http://localhost:${PORT}`);
     });
   }
-
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
 }
 
+// Ensure routes are configured before exporting for Vercel
+// But don't start the server if we're on Vercel
 startServer();
+
+export default app;

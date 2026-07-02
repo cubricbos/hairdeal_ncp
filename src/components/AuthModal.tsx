@@ -696,6 +696,8 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
       const height = 600;
       const left = window.screen.width / 2 - width / 2;
       const top = window.screen.height / 2 - height / 2;
+      
+      // Open our custom backend OAuth endpoints instead of Supabase Auth
       window.open(`/api/auth/${provider}/login`, 'oauth', `width=${width},height=${height},left=${left},top=${top}`);
     } catch (err: any) {
       setError(err.message);
