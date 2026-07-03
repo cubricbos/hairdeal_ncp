@@ -826,12 +826,17 @@ async function startServer() {
     const vercelUrl = process.env.VERCEL_URL;
     
     const host = req.headers['x-forwarded-host'] || req.get('host');
-    const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+    let protocol = req.headers['x-forwarded-proto'] || req.protocol;
+    
+    // 강제로 https로 변환해야 하는 도메인들 (Vercel, AI Studio)
+    if (host && (host.includes('.run.app') || host.includes('vercel.app'))) {
+      protocol = 'https';
+    }
     
     // Explicit hardcode fallback for the known production domain
     if (process.env.VERCEL === '1' || process.env.NODE_ENV === 'production') {
-      // Force hairdeal.io if we are on Vercel unless it's a specific Vercel preview URL
-      if (host && host.includes('vercel.app')) {
+      // Force hairdeal.io if we are on Vercel unless it's a specific preview URL
+      if (host && (host.includes('vercel.app') || host.includes('.run.app'))) {
         return `https://${host}`;
       }
       return 'https://hairdeal.io';
