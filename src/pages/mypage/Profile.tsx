@@ -144,6 +144,16 @@ const ProfilePage: React.FC = () => {
       const token = localStorage.getItem('ncp_access_token');
       let profileLoadedSuccessfully = false;
 
+      let supaProvider = '';
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          supaProvider = session.user.app_metadata?.provider || session.user.identities?.[0]?.provider || '';
+        }
+      } catch (err) {
+        console.warn('Failed to detect active Supabase provider:', err);
+      }
+
       if (!token) {
         // Fallback to Supabase Profile for social-logged-in users
         try {
@@ -156,7 +166,8 @@ const ProfilePage: React.FC = () => {
                 name: spProfile.full_name || '',
                 mobileNumber: spProfile.phone || '',
                 introduction: spProfile.introduction || '',
-                profileImageUrl: spProfile.avatar_url || ''
+                profileImageUrl: spProfile.avatar_url || '',
+                provider: supaProvider || 'email'
               };
               setProfile(fbProf);
               setName(spProfile.full_name || '');
@@ -210,7 +221,10 @@ const ProfilePage: React.FC = () => {
              backendCareerYears = localStorage.getItem(`ncp_career_years_${finalId}`) || '';
           }
 
-          setProfile(data);
+          setProfile({
+            ...data,
+            provider: data.provider || data.signedBy || data.snsType || data.loginType || supaProvider || 'email'
+          });
           setName(data.name || decoded?.name || '디자이너');
           setNickname(backendNickname);
           setPosition(backendPosition);
@@ -809,16 +823,127 @@ const ProfilePage: React.FC = () => {
             </div>
           </div>
           
-          <div className="space-y-2">
-            <label className="text-sm font-bold text-gray-700 ml-1">소개글</label>
-            <div className="relative">
-              <FileText className="absolute left-4 top-6 -translate-y-1/2 w-5 h-5 text-gray-400" />
-              <textarea 
-                value={introduction}
-                onChange={(e) => setIntroduction(e.target.value)}
-                className="w-full pl-12 pr-4 py-4 bg-gray-50 rounded-2xl border-none focus:ring-2 focus:ring-brand-primary/20 font-bold text-gray-900 min-h-[120px] resize-y"
-                placeholder="간단한 소개글을 입력하세요"
-              />
+          <div className="space-y-6">
+            <div className="space-y-2">
+              <label className="text-sm font-bold text-gray-700 ml-1">소개글</label>
+              <div className="relative">
+                <FileText className="absolute left-4 top-6 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                <textarea 
+                  value={introduction}
+                  onChange={(e) => setIntroduction(e.target.value)}
+                  className="w-full pl-12 pr-4 py-4 bg-gray-50 rounded-2xl border-none focus:ring-2 focus:ring-brand-primary/20 font-bold text-gray-900 min-h-[120px] resize-y"
+                  placeholder="간단한 소개글을 입력하세요"
+                />
+              </div>
+            </div>
+
+            {/* NCP 가입 정보 */}
+            <div className="bg-gray-50/70 border border-gray-100/50 rounded-3xl p-6 mt-6">
+              <h3 className="text-base font-bold text-gray-800 mb-4 flex items-center gap-2">
+                <Shield className="w-5 h-5 text-brand-primary" />
+                NCP 계정 가입 정보
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                <div className="bg-white/80 p-4 rounded-2xl border border-gray-100 shadow-sm">
+                  <div className="text-xs text-gray-400 font-bold mb-1">최초 가입일</div>
+                  <div className="text-sm font-black text-gray-800">
+                    {profile?.createdAt ? new Date(profile.createdAt).toLocaleDateString('ko-KR', {
+                      year: 'numeric',
+                      month: 'long',
+                      day: 'numeric'
+                    }) : '정보 없음'}
+                  </div>
+                </div>
+
+                 <div className="bg-white/80 p-4 rounded-2xl border border-gray-100 shadow-sm">
+                   <div className="text-xs text-gray-400 font-bold mb-1">가입 유형</div>
+                   <div className="inline-flex mt-1">
+                     {(() => {
+                       const providerVal = (profile?.provider || '').toLowerCase();
+                       const signedByVal = (profile?.signedBy || '').toLowerCase();
+                       const loginTypeVal = (profile?.loginType || '').toLowerCase();
+                       const snsTypeVal = (profile?.snsType || '').toLowerCase();
+                       const emailVal = (email || '').toLowerCase();
+                       
+                       // 1. Check if Kakao login
+                       const isKakao = providerVal === 'kakao' || 
+                                       signedByVal === 'kakao' || 
+                                       loginTypeVal === 'kakao' || 
+                                       snsTypeVal === 'kakao' || 
+                                       emailVal.includes('kakao.social') || 
+                                       emailVal.includes('kakao_') || 
+                                       emailVal.endsWith('@kakao.com');
+                       
+                       // 2. Check if Naver login
+                       const isNaver = providerVal === 'naver' || 
+                                       signedByVal === 'naver' || 
+                                       loginTypeVal === 'naver' || 
+                                       snsTypeVal === 'naver' || 
+                                       emailVal.includes('naver.social') || 
+                                       emailVal.includes('naver_') || 
+                                       emailVal.endsWith('@naver.com');
+                       
+                       // 3. Check if Google login
+                       const isGoogle = providerVal === 'google' || 
+                                        signedByVal === 'google' || 
+                                        loginTypeVal === 'google' || 
+                                        snsTypeVal === 'google' || 
+                                        emailVal.includes('google.social') || 
+                                        emailVal.includes('google_') || 
+                                        emailVal.includes('gmail');
+                       
+                       // 4. Check if Phone login
+                       const isPhone = providerVal === 'phone' || 
+                                       signedByVal === 'phone' || 
+                                       loginTypeVal === 'phone' || 
+                                       snsTypeVal === 'phone' || 
+                                       emailVal.includes('social.user') || 
+                                       emailVal.endsWith('.local') || 
+                                       !emailVal || 
+                                       !emailVal.includes('@');
+                       
+                       if (isGoogle) {
+                         return (
+                           <span className="px-3 py-1 text-xs font-bold rounded-full bg-red-50 text-red-600 border border-red-100">
+                             구글 (Google)
+                           </span>
+                         );
+                       } else if (isKakao) {
+                         return (
+                           <span className="px-3 py-1 text-xs font-bold rounded-full bg-yellow-50 text-yellow-800 border border-yellow-100">
+                             카카오 (Kakao)
+                           </span>
+                         );
+                       } else if (isNaver) {
+                         return (
+                           <span className="px-3 py-1 text-xs font-bold rounded-full bg-emerald-50 text-emerald-600 border border-emerald-100">
+                             네이버 (Naver)
+                           </span>
+                         );
+                       } else if (isPhone) {
+                         return (
+                           <span className="px-3 py-1 text-xs font-bold rounded-full bg-brand-primary/10 text-brand-primary border border-brand-primary/20">
+                             휴대폰번호
+                           </span>
+                         );
+                       } else {
+                         return (
+                           <span className="px-3 py-1 text-xs font-bold rounded-full bg-indigo-50 text-indigo-600 border border-indigo-100">
+                             이메일 (Email)
+                           </span>
+                         );
+                       }
+                     })()}
+                   </div>
+                 </div>
+
+                <div className="bg-white/80 p-4 rounded-2xl border border-gray-100 shadow-sm">
+                  <div className="text-xs text-gray-400 font-bold mb-1">이메일 주소</div>
+                  <div className="text-sm font-black text-gray-800 truncate" title={email}>
+                    {email || '등록된 이메일 없음'}
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
           

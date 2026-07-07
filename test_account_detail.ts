@@ -14,14 +14,17 @@ async function run() {
         'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1'
       }
     });
-    console.log("Account Server /designer/detail response:");
-    console.log(JSON.stringify(res.data, null, 2));
+    console.log("Designer keys:", Object.keys(res.data));
+    const fields = [
+      'id', 'name', 'email', 'mobileNumber', 'signedBy', 'socialLoginId', 'provider', 'snsType', 'loginType'
+    ];
+    fields.forEach(f => {
+      console.log(`${f}:`, res.data[f]);
+    });
   } catch (e: any) {
     console.log("Error querying Account server:", e.message);
-    if (e.response) {
-      console.log("Response:", e.response.status, JSON.stringify(e.response.data));
-    }
   }
 }
 
 run();
+

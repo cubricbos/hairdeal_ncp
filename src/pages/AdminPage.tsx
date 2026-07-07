@@ -265,6 +265,9 @@ export default function AdminPage({ user }: { user: User | null }) {
   const [inquiries, setInquiries] = useState<Inquiry[]>([]);
   const [aiModels, setAiModels] = useState<AiModel[]>([]);
   const [profiles, setProfiles] = useState<any[]>([]);
+  const [userProvidersMap, setUserProvidersMap] = useState<Record<string, string>>({});
+  const [userEmailsMap, setUserEmailsMap] = useState<Record<string, string>>({});
+  const [userPhonesMap, setUserPhonesMap] = useState<Record<string, string>>({});
   const [hasCreditsColumn, setHasCreditsColumn] = useState(true);
   const [hairStyles, setHairStyles] = useState<
     {
@@ -385,6 +388,9 @@ export default function AdminPage({ user }: { user: User | null }) {
       setSelectedDesignerDetail({ 
         ...profile, 
         ...data, 
+        provider: profile.provider || data.provider || data.signedBy || data.loginType || data.snsType || null,
+        email: profile.email || data.email || null,
+        mobileNumber: profile.mobileNumber || data.mobileNumber || null,
         career: null,
         introduce: data.introduce || data.introduction || null,
         ncpCreditHistory: ncpTxs, 
@@ -397,6 +403,9 @@ export default function AdminPage({ user }: { user: User | null }) {
         setSelectedDesignerDetail({ 
            ...profile, 
            ...data, 
+           provider: profile.provider || data.provider || data.signedBy || data.loginType || data.snsType || null,
+           email: profile.email || data.email || null,
+           mobileNumber: profile.mobileNumber || data.mobileNumber || null,
            career: null,
            ncpCreditHistory: ncpTxs, 
            supaProfile: profile 
@@ -635,12 +644,80 @@ export default function AdminPage({ user }: { user: User | null }) {
     document.title = `${titleMap[activeTab] || "관리자 페이지"} - Cubric`;
   }, [activeTab]);
 
+  const getDesignerCreatedAt = (designer: any) => {
+    if (!designer) return null;
+    const possibleKeys = [
+      'createdAt',
+      'createdDateTime',
+      'createdDate',
+      'createDateTime',
+      'createDate',
+      'registerDate',
+      'regDate',
+      'regDateTime',
+      'created',
+      'created_at',
+      'joinedAt',
+      'registerDateTime'
+    ];
+    for (const key of possibleKeys) {
+      if (designer[key]) return designer[key];
+    }
+    if (designer.profile) {
+      for (const key of possibleKeys) {
+        if (designer.profile[key]) return designer.profile[key];
+      }
+    }
+    return null;
+  };
+
   const fetchData = async () => {
     if (!isAdmin) return;
     if (inquiries.length === 0 && profiles.length === 0) {
       setIsLoading(true);
     }
+    
+    let cleanProviders: Record<string, string> = {};
+    let cleanEmails: Record<string, string> = {};
+    let cleanPhones: Record<string, string> = {};
+
     try {
+      // 1. Fetch real auth providers / identities from Supabase Auth via our backend proxy
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token || localStorage.getItem('ncp_access_token');
+        if (token) {
+          const provRes = await fetch('/api/admin/user-providers', {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+          if (provRes.ok) {
+            const provData = await provRes.json();
+            const providersMap = provData.providers || {};
+            const emailsMap = provData.emails || {};
+            const phonesMap = provData.phones || {};
+            
+            Object.entries(providersMap).forEach(([k, v]) => {
+              cleanProviders[k.replace(/-/g, '').toLowerCase()] = String(v);
+            });
+            Object.entries(emailsMap).forEach(([k, v]) => {
+              cleanEmails[k.replace(/-/g, '').toLowerCase()] = String(v);
+            });
+            Object.entries(phonesMap).forEach(([k, v]) => {
+              cleanPhones[k.replace(/-/g, '').toLowerCase()] = String(v);
+            });
+
+            setUserProvidersMap(cleanProviders);
+            setUserEmailsMap(cleanEmails);
+            setUserPhonesMap(cleanPhones);
+            console.log(`[AdminPage] Successfully loaded ${Object.keys(cleanProviders).length} user providers from backend.`);
+          }
+        }
+      } catch (err) {
+        console.warn("Failed to load user providers:", err);
+      }
+
       // Fetch inquiries
       const { data: inquiryData, error: inquiryError } = await supabase
         .from("inquiries")
@@ -740,7 +817,7 @@ export default function AdminPage({ user }: { user: User | null }) {
           subscription_plan: designer.subscriptionPlan || null,
           subscription_status: designer.subscriptionStatus || 'inactive',
           subscription_end_date: designer.subscriptionEndDate || null,
-          created_at: designer.createdAt || new Date().toISOString(),
+          created_at: getDesignerCreatedAt(designer),
           billing_key: designer.billingKey || null,
           card_company: designer.cardCompany || null,
           card_number: designer.cardNumber || null,
@@ -872,13 +949,25 @@ export default function AdminPage({ user }: { user: User | null }) {
             ncpAvatarUrl = Array.from(new Set(cands)).join(',');
           }
           
+          const cleanUId = u.id ? u.id.replace(/-/g, '').toLowerCase() : '';
+          const realProvider = cleanProviders[cleanUId] || null;
+          const realEmail = cleanEmails[cleanUId] || ncpData.email || u.email || ncpData.accountId || u.id || '';
+          const realPhone = cleanPhones[cleanUId] || ncpData.mobileNumber || u.mobileNumber || '';
+
           return {
             ...u,
             credits: u.credits !== undefined ? Number(u.credits || 0) : 0,
             full_name: ncpData.name || u.name || u.full_name,
             avatar_url: ncpAvatarUrl,
             business_status: typeof ncpData.businessStatus === 'string' ? ncpData.businessStatus : (u.business_status || u.status || 'active'),
-            ncp_synced: !!(ncpData.email || u.email) // Custom flag to show if they exist in NCP
+            ncp_synced: !!(ncpData.email || u.email || ncpData.accountId || u.id), // Custom flag to show if they exist in NCP
+            created_at: getDesignerCreatedAt(ncpData) || u.created_at,
+            provider: realProvider || ncpData.provider || u.provider || ncpData.signedBy || ncpData.loginType || ncpData.snsType || null,
+            signedBy: realProvider || ncpData.signedBy || u.signedBy || null,
+            loginType: realProvider || ncpData.loginType || u.loginType || null,
+            snsType: realProvider || ncpData.snsType || u.snsType || null,
+            email: realEmail,
+            mobileNumber: realPhone
           };
         }));
         
@@ -2910,10 +2999,82 @@ export default function AdminPage({ user }: { user: User | null }) {
                                   )}
                                 </div>
                                 <div className="min-w-0">
-                                  <p className="text-sm font-bold text-gray-900 truncate">
-                                    {profile.full_name || "이름 없음"}
+                                  <p className="text-sm font-bold text-gray-900 truncate flex items-center gap-2 flex-wrap">
+                                    <span>{profile.full_name || "이름 없음"}</span>
+                                    {(() => {
+                                      const providerVal = (profile.provider || '').toLowerCase();
+                                      const signedByVal = (profile.signedBy || '').toLowerCase();
+                                      const loginTypeVal = (profile.loginType || '').toLowerCase();
+                                      const snsTypeVal = (profile.snsType || '').toLowerCase();
+                                      const emailVal = (profile.email || '').toLowerCase();
+                                      
+                                      const isKakao = providerVal === 'kakao' || 
+                                                      signedByVal === 'kakao' || 
+                                                      loginTypeVal === 'kakao' || 
+                                                      snsTypeVal === 'kakao' || 
+                                                      emailVal.includes('kakao.social') || 
+                                                      emailVal.includes('kakao_') || 
+                                                      emailVal.endsWith('@kakao.com');
+                                      
+                                      const isNaver = providerVal === 'naver' || 
+                                                      signedByVal === 'naver' || 
+                                                      loginTypeVal === 'naver' || 
+                                                      snsTypeVal === 'naver' || 
+                                                      emailVal.includes('naver.social') || 
+                                                      emailVal.includes('naver_') || 
+                                                      emailVal.endsWith('@naver.com');
+                                      
+                                      const isGoogle = providerVal === 'google' || 
+                                                       signedByVal === 'google' || 
+                                                       loginTypeVal === 'google' || 
+                                                       snsTypeVal === 'google' || 
+                                                       emailVal.includes('google.social') || 
+                                                       emailVal.includes('google_') || 
+                                                       emailVal.includes('gmail');
+                                      
+                                      const isPhone = providerVal === 'phone' || 
+                                                      signedByVal === 'phone' || 
+                                                      loginTypeVal === 'phone' || 
+                                                      snsTypeVal === 'phone' || 
+                                                      emailVal.includes('social.user') || 
+                                                      emailVal.endsWith('.local') || 
+                                                      !emailVal || 
+                                                      !emailVal.includes('@');
+                                      
+                                      if (isGoogle) {
+                                        return (
+                                          <span className="px-1.5 py-0.5 text-[10px] font-bold rounded bg-red-50 text-red-600 border border-red-100 shrink-0">
+                                            구글
+                                          </span>
+                                        );
+                                      } else if (isKakao) {
+                                        return (
+                                          <span className="px-1.5 py-0.5 text-[10px] font-bold rounded bg-yellow-50 text-yellow-800 border border-yellow-100 shrink-0">
+                                            카카오
+                                          </span>
+                                        );
+                                      } else if (isNaver) {
+                                        return (
+                                          <span className="px-1.5 py-0.5 text-[10px] font-bold rounded bg-emerald-50 text-emerald-600 border border-emerald-100 shrink-0">
+                                            네이버
+                                          </span>
+                                        );
+                                      } else if (isPhone) {
+                                        return (
+                                          <span className="px-1.5 py-0.5 text-[10px] font-bold rounded bg-blue-50 text-blue-600 border border-blue-100 shrink-0">
+                                            휴대폰번호
+                                          </span>
+                                        );
+                                      } else {
+                                        return (
+                                          <span className="px-1.5 py-0.5 text-[10px] font-bold rounded bg-indigo-50 text-indigo-600 border border-indigo-100 shrink-0">
+                                            이메일
+                                          </span>
+                                        );
+                                      }
+                                    })()}
                                     {profile.is_blacklisted && (
-                                      <span className="ml-2 text-[10px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded-sm outline outline-1 outline-red-200">
+                                      <span className="text-[10px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded-sm outline outline-1 outline-red-200">
                                         정지됨
                                       </span>
                                     )}
@@ -2988,9 +3149,9 @@ export default function AdminPage({ user }: { user: User | null }) {
                               </td>
                             )}
                             <td className="p-5 text-sm text-gray-500">
-                              {profile.created_at
+                              {profile.ncp_synced && profile.created_at
                                 ? formatDate(profile.created_at)
-                                : "-"}
+                                : "null"}
                             </td>
                             <td className="p-5">
                               <button
@@ -4065,9 +4226,87 @@ export default function AdminPage({ user }: { user: User | null }) {
                      )}
                    </div>
                    <div>
-                     <h2 className="text-xl font-bold text-gray-900">
-                       {selectedDesignerDetail.name} <span className="font-medium text-sm text-gray-500 text-left">님 정보</span>
-                     </h2>
+                     <div className="flex items-center gap-2 flex-wrap mb-1">
+                       <h2 className="text-xl font-bold text-gray-900 leading-none">
+                         {selectedDesignerDetail.name} <span className="font-medium text-sm text-gray-500 text-left">님 정보</span>
+                       </h2>
+                       {(() => {
+                         const providerVal = (selectedDesignerDetail.provider || '').toLowerCase();
+                         const signedByVal = (selectedDesignerDetail.signedBy || '').toLowerCase();
+                         const loginTypeVal = (selectedDesignerDetail.loginType || '').toLowerCase();
+                         const snsTypeVal = (selectedDesignerDetail.snsType || '').toLowerCase();
+                         const emailVal = (selectedDesignerDetail.email || '').toLowerCase();
+                         
+                         // 1. Check if Kakao login
+                         const isKakao = providerVal === 'kakao' || 
+                                         signedByVal === 'kakao' || 
+                                         loginTypeVal === 'kakao' || 
+                                         snsTypeVal === 'kakao' || 
+                                         emailVal.includes('kakao.social') || 
+                                         emailVal.includes('kakao_') || 
+                                         emailVal.endsWith('@kakao.com');
+                         
+                         // 2. Check if Naver login
+                         const isNaver = providerVal === 'naver' || 
+                                         signedByVal === 'naver' || 
+                                         loginTypeVal === 'naver' || 
+                                         snsTypeVal === 'naver' || 
+                                         emailVal.includes('naver.social') || 
+                                         emailVal.includes('naver_') || 
+                                         emailVal.endsWith('@naver.com');
+                         
+                         // 3. Check if Google login
+                         const isGoogle = providerVal === 'google' || 
+                                          signedByVal === 'google' || 
+                                          loginTypeVal === 'google' || 
+                                          snsTypeVal === 'google' || 
+                                          emailVal.includes('google.social') || 
+                                          emailVal.includes('google_') || 
+                                          emailVal.includes('gmail');
+                         
+                         // 4. Check if Phone login
+                         const isPhone = providerVal === 'phone' || 
+                                         signedByVal === 'phone' || 
+                                         loginTypeVal === 'phone' || 
+                                         snsTypeVal === 'phone' || 
+                                         emailVal.includes('social.user') || 
+                                         emailVal.endsWith('.local') || 
+                                         !emailVal || 
+                                         !emailVal.includes('@');
+                         
+                         if (isGoogle) {
+                           return (
+                             <span className="px-2.5 py-0.5 text-[11px] font-bold rounded-full bg-red-50 text-red-600 border border-red-100 shrink-0">
+                               구글 (Google)
+                             </span>
+                           );
+                         } else if (isKakao) {
+                           return (
+                             <span className="px-2.5 py-0.5 text-[11px] font-bold rounded-full bg-yellow-50 text-yellow-800 border border-yellow-100 shrink-0">
+                               카카오 (Kakao)
+                             </span>
+                           );
+                         } else if (isNaver) {
+                           return (
+                             <span className="px-2.5 py-0.5 text-[11px] font-bold rounded-full bg-emerald-50 text-emerald-600 border border-emerald-100 shrink-0">
+                               네이버 (Naver)
+                             </span>
+                           );
+                         } else if (isPhone) {
+                           return (
+                             <span className="px-2.5 py-0.5 text-[11px] font-bold rounded-full bg-blue-50 text-blue-600 border border-blue-100 shrink-0">
+                               휴대폰번호
+                             </span>
+                           );
+                         } else {
+                           return (
+                             <span className="px-2.5 py-0.5 text-[11px] font-bold rounded-full bg-indigo-50 text-indigo-600 border border-indigo-100 shrink-0">
+                               이메일 (Email)
+                             </span>
+                           );
+                         }
+                       })()}
+                     </div>
                      <p className="text-xs text-gray-400 font-medium">{selectedDesignerDetail.email}</p>
                    </div>
                 </div>

@@ -888,21 +888,14 @@ async function startServer() {
               if (linkData?.user) {
                 userId = linkData.user.id;
               } else {
-                console.warn(`[SocialSync] Falling back to listUsers pagination to find user by email...`);
-                let page = 1;
-                while (true) {
-                  const { data: listData, error: listError } = await getSupabaseAdmin().auth.admin.listUsers({ page, perPage: 10 });
-                  if (listError) {
-                    console.error(`[SocialSync] listUsers failed on page ${page}:`, listError);
-                    break;
-                  }
-                  const foundUser = listData.users.find((u: any) => u.email === finalEmail);
-                  if (foundUser) {
-                    userId = foundUser.id;
-                    break;
-                  }
-                  if (listData.users.length < 10) break;
-                  page++;
+                console.log(`[SocialSync] Falling back to profiles query to find user by email...`);
+                const { data: prof } = await getSupabaseAdmin()
+                  .from('profiles')
+                  .select('id')
+                  .eq('email', finalEmail)
+                  .maybeSingle();
+                if (prof && prof.id) {
+                  userId = prof.id;
                 }
               }
 
@@ -1211,6 +1204,101 @@ async function startServer() {
     }
   });
 
+  // Secure endpoint to fetch real auth providers/identities from Supabase Auth
+  app.get('/api/admin/user-providers', async (req, res) => {
+    if (!getSupabaseAdmin()) {
+      return res.status(500).json({ error: 'Supabase admin client not initialized' });
+    }
+
+    try {
+      let authInfo = null;
+      try {
+        authInfo = await authenticateIncomingRequest(req);
+      } catch (authError) {
+        console.warn("[User Providers Auth] standard verification error:", authError);
+      }
+
+      let isAuthorized = false;
+
+      // Fetch current site_settings to get custom admin credentials
+      const { data: currentSettings } = await getSupabaseAdmin()
+        .from('site_settings')
+        .select('settings')
+        .eq('id', 'default')
+        .maybeSingle();
+      
+      const ppAdminId = currentSettings?.settings?.parkingPage?.adminId || 'cubric.ceo@gmail.com';
+      const cleanAdminId = ppAdminId.toLowerCase().trim();
+
+      if (authInfo && authInfo.email) {
+        const userEmail = authInfo.email.toLowerCase().trim();
+        // Allow if it matches admin credentials or standard roles
+        if (userEmail === 'cubric.ceo@gmail.com' || userEmail.includes('cubric') || userEmail === cleanAdminId) {
+          isAuthorized = true;
+        } else {
+          // Double check their role in profiles table
+          const { data: matchedProfile } = await getSupabaseAdmin()
+            .from('profiles')
+            .select('role')
+            .eq('id', authInfo.id)
+            .maybeSingle();
+          if (matchedProfile && (matchedProfile.role === 'admin' || matchedProfile.role === 'super_admin' || matchedProfile.role === 'operator')) {
+            isAuthorized = true;
+          }
+        }
+      }
+
+      if (!isAuthorized) {
+        return res.status(403).json({ error: 'Not authorized' });
+      }
+
+      const providerMap: Record<string, string> = {};
+      const emailMap: Record<string, string> = {};
+      const phoneMap: Record<string, string> = {};
+
+      // Directly fetch user info from profiles table (avoiding broken listUsers auth service API)
+      try {
+        const { data: profileRecords } = await getSupabaseAdmin()
+          .from('profiles')
+          .select('id, email, full_name, mobile_number, provider');
+        
+        if (profileRecords) {
+          profileRecords.forEach((p: any) => {
+            if (p.email) {
+              emailMap[p.id] = p.email;
+            }
+            if (p.mobile_number) {
+              phoneMap[p.id] = p.mobile_number;
+            }
+            
+            // Determine provider
+            let resolvedProvider = p.provider || 'email';
+            const emailLower = (p.email || '').toLowerCase();
+            if (resolvedProvider === 'email') {
+              if (emailLower.includes('kakao.social') || emailLower.includes('kakao_') || emailLower.endsWith('@kakao.com')) {
+                resolvedProvider = 'kakao';
+              } else if (emailLower.includes('naver.social') || emailLower.includes('naver_') || emailLower.endsWith('@naver.com')) {
+                resolvedProvider = 'naver';
+              } else if (emailLower.includes('google.social') || emailLower.includes('google_') || emailLower.includes('gmail')) {
+                resolvedProvider = 'google';
+              } else if (p.mobile_number || emailLower.includes('social.user') || emailLower.endsWith('.local') || !emailLower || !emailLower.includes('@')) {
+                resolvedProvider = 'phone';
+              }
+            }
+            providerMap[p.id] = resolvedProvider;
+          });
+        }
+      } catch (dbQueryErr: any) {
+        console.log("[User Providers] Database lookup fallback info:", dbQueryErr.message || dbQueryErr);
+      }
+
+      return res.json({ providers: providerMap, emails: emailMap, phones: phoneMap });
+    } catch (err: any) {
+      console.error("[User Providers] Error fetching auth providers:", err);
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
   // Secure endpoint to update site settings (bypassing Client RLS issues)
   app.post('/api/admin/site-settings', async (req, res) => {
     if (!getSupabaseAdmin()) {
@@ -1406,16 +1494,6 @@ async function startServer() {
           if (matchedProfile && matchedProfile.id) {
             console.log(`[ensure-profile] Aligning ID (via profiles table search): mapped ${finalUserId} to existing profile ID ${matchedProfile.id} for email ${searchEmail}`);
             finalUserId = matchedProfile.id;
-          } else {
-            // B. Fallback to listUsers list and find matching email
-            const { data: listData } = await getSupabaseAdmin().auth.admin.listUsers();
-            const matchedUser = listData?.users?.find(
-              (u: any) => u.email?.toLowerCase() === searchEmail.toLowerCase()
-            );
-            if (matchedUser) {
-              console.log(`[ensure-profile] Aligning ID (via auth.users list search): mapped ${finalUserId} to existing auth.user ID ${matchedUser.id} for email ${searchEmail}`);
-              finalUserId = matchedUser.id;
-            }
           }
         } catch (err: any) {
           console.warn("[ensure-profile] Pre-checking email alignment failed, falling back to original ID:", err.message || err);
@@ -1484,14 +1562,19 @@ async function startServer() {
             .replace(/@hanmail\.co$/, '@hanmail.net');
 
           if (normalizedEmail && !normalizedEmail.endsWith('@ncp.local')) {
-            const { data: listData } = await getSupabaseAdmin().auth.admin.listUsers();
-            const matchedUser = listData?.users?.find(
-              (u: any) => u.email?.toLowerCase() === normalizedEmail
-            );
-            if (matchedUser) {
-              authUser = matchedUser;
-              console.log(`[ensure-profile] User found in auth.users by email: mapping ${finalUserId} to ${authUser.id}`);
-              finalUserId = authUser.id;
+            const { data: matchedProfile } = await getSupabaseAdmin()
+              .from('profiles')
+              .select('id')
+              .eq('email', normalizedEmail)
+              .maybeSingle();
+            
+            if (matchedProfile && matchedProfile.id) {
+              const { data: userData } = await getSupabaseAdmin().auth.admin.getUserById(matchedProfile.id);
+              if (userData?.user) {
+                authUser = userData.user;
+                console.log(`[ensure-profile] User found in auth.users by email (via profiles search): mapping ${finalUserId} to ${authUser.id}`);
+                finalUserId = authUser.id;
+              }
             }
           }
         }
