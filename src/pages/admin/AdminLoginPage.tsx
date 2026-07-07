@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { accountClient } from '../../lib/ncpClient';
 import { Lock, User } from 'lucide-react';
+import { useSiteContext } from '../../context/SiteContext';
 
 export default function AdminLoginPage() {
   const [accountId, setAccountId] = useState('');
@@ -9,17 +10,22 @@ export default function AdminLoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
+  const { settings } = useSiteContext();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
+    
+    const ppAdminId = settings?.parkingPage?.adminId || 'cubric.ceo@gmail.com';
+    const ppAdminPw = settings?.parkingPage?.adminPassword || 'cubric_default_password_1!';
 
     // Dynamic bypass for admin local development / system admin login
     const isLocalBypass = 
       (accountId.trim() === 'admin' && password.trim() === 'admin') || 
       (accountId.trim() === 'admin@cubric.io' && password.trim() === 'password') ||
-      (accountId.trim() === 'cubric.ceo@gmail.com' && password.trim() === 'admin');
+      (accountId.trim() === 'cubric.ceo@gmail.com' && password.trim() === 'admin') ||
+      (accountId.trim() === ppAdminId && password.trim() === ppAdminPw);
 
     if (isLocalBypass) {
       try {

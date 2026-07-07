@@ -648,7 +648,7 @@ async function startServer() {
       if (!matchedDesignerId) {
         console.log(`[SocialSync] No matching NCP designer found. Auto-registering new designer profile on NCP...`);
         try {
-          const accountUrl = process.env.ACCOUNT_SERVER_URL || 'http://account.cubric.io';
+          const accountUrl = process.env.VITE_NCP_ACCOUNT_API_URL || 'https://cubric-account-service-755716171569.asia-northeast3.run.app';
           const shopId = crypto.randomUUID().replace(/-/g, '');
           const cleanSocialPhone = phone || '01000000000';
 
@@ -684,7 +684,7 @@ async function startServer() {
             }
           };
 
-          const createRes = await axios.post(`${accountUrl}/api/designer`, registerPayload, {
+          const createRes = await axios.post(`${accountUrl}/designer`, registerPayload, {
             headers: { 'Content-Type': 'application/json' },
             timeout: 10000
           });
@@ -710,7 +710,13 @@ async function startServer() {
             }
           }
         } catch (regErr: any) {
-          console.error(`[SocialSync] Failed to register new NCP designer on NCP server:`, regErr.response?.data || regErr.message);
+          const respData = regErr.response?.data;
+          const status = regErr.response?.status;
+          if (status === 400 || (respData && typeof respData === 'object' && respData.error === 'Bad Request')) {
+            console.log(`[SocialSync] NCP designer registration returned 400 Bad Request (User may already exist). Ignoring...`);
+          } else {
+            console.error(`[SocialSync] Failed to register new NCP designer on NCP server:`, respData || regErr.message);
+          }
         }
       }
 
@@ -745,30 +751,103 @@ async function startServer() {
             email_confirm: true,
             user_metadata: { full_name: finalName, phone: finalPhone, provider }
           });
+          
           if (error) {
-            console.warn(`[SocialSync] Create with formattedUuid failed: ${error.message}. Falling back to random ID...`);
-            const { data: fallbackData, error: fallbackError } = await getSupabaseAdmin().auth.admin.createUser({
-              email: finalEmail,
-              password: password,
-              email_confirm: true,
-              user_metadata: { full_name: finalName, phone: finalPhone, provider }
-            });
-            if (fallbackError) throw fallbackError;
-            if (fallbackData.user) userId = fallbackData.user.id;
-          } else if (data.user) {
+            const isDuplicateError = error.message.includes('already been registered') || error.status === 422 || error.code === 'user_already_exists';
+            if (isDuplicateError) {
+              console.log(`[SocialSync] User with email ${finalEmail} already exists in auth. Recovering ID via generateLink...`);
+            } else {
+              console.warn(`[SocialSync] Create with formattedUuid failed: ${error.message}.`);
+            }
+            if (isDuplicateError) {
+              const { data: linkData, error: linkError } = await getSupabaseAdmin().auth.admin.generateLink({
+                type: 'magiclink',
+                email: finalEmail
+              });
+              
+              if (linkError) {
+                console.error(`[SocialSync] generateLink failed:`, linkError);
+              }
+
+              if (linkData?.user) {
+                userId = linkData.user.id;
+              } else {
+                console.warn(`[SocialSync] Falling back to listUsers pagination to find user by email...`);
+                let page = 1;
+                while (true) {
+                  const { data: listData, error: listError } = await getSupabaseAdmin().auth.admin.listUsers({ page, perPage: 10 });
+                  if (listError) {
+                    console.error(`[SocialSync] listUsers failed on page ${page}:`, listError);
+                    break;
+                  }
+                  const foundUser = listData.users.find((u: any) => u.email === finalEmail);
+                  if (foundUser) {
+                    userId = foundUser.id;
+                    break;
+                  }
+                  if (listData.users.length < 10) break;
+                  page++;
+                }
+              }
+
+              if (userId) {
+                console.log(`[SocialSync] Recovered existing Auth User ID: ${userId}. Updating password...`);
+                await getSupabaseAdmin().auth.admin.updateUserById(userId, { 
+                  password: password,
+                  user_metadata: { full_name: finalName, phone: finalPhone, provider }
+                });
+                
+                // Manually insert into profiles since the trigger may have failed previously
+                console.log(`[SocialSync] Inserting recovered user into profiles...`);
+                await getSupabaseAdmin().from('profiles').upsert({
+                  id: userId,
+                  email: finalEmail,
+                  full_name: finalName,
+                  role: 'user'
+                }).select().maybeSingle();
+              } else {
+                console.error(`[SocialSync] Could not recover user. original error: ${error.message}, linkError: ${linkError?.message}`);
+                throw linkError || error;
+              }
+            } else {
+              console.log(`[SocialSync] Falling back to random ID...`);
+              const { data: fallbackData, error: fallbackError } = await getSupabaseAdmin().auth.admin.createUser({
+                email: finalEmail,
+                password: password,
+                email_confirm: true,
+                user_metadata: { full_name: finalName, phone: finalPhone, provider }
+              });
+              if (fallbackError) throw fallbackError;
+              if (fallbackData?.user) userId = fallbackData.user.id;
+            }
+          } else if (data?.user) {
             userId = data.user.id;
           }
         } catch (authCreateErr: any) {
           console.error(`[SocialSync] Critical Auth User registration failure:`, authCreateErr.message);
-          // Ultimate fallback
-          const { data: ultimateData } = await getSupabaseAdmin().auth.admin.listUsers();
-          const alreadyUser = ultimateData?.users?.find((u: any) => u.email?.toLowerCase() === finalEmail.toLowerCase());
-          if (alreadyUser) {
-            userId = alreadyUser.id;
-          } else {
-            throw authCreateErr;
-          }
+          throw authCreateErr;
         }
+      }
+
+      // 4.5 Register to NCP Backend to prevent silent 401 Auto Logout
+      try {
+        const cleanNcpId = userId.replace(/-/g, '');
+        const ncpPayload = {
+          id: cleanNcpId,
+          name: finalName || '사용자',
+          mobileNumber: finalPhone || '01000000000',
+          email: finalEmail,
+          loginId: finalEmail,
+          password: password,
+          provider: provider,
+          marketingTerms: true,
+          pushTerms: false
+        };
+        const axios = require('axios');
+        await axios.post('https://cubric-account-service-755716171569.asia-northeast3.run.app/designer', ncpPayload);
+        console.log(`[SocialSync] Ensured NCP Designer registration.`);
+      } catch (e: any) {
+        console.warn(`[SocialSync] NCP Designer registration warning (may already exist):`, e.message);
       }
 
       // 5. Sign in to Supabase Client instance to obtain standard session context
@@ -1306,7 +1385,7 @@ async function startServer() {
             id: finalUserId,
             email: normalizedEmail,
             email_confirm: true,
-            password: 'default_placeholder_password',
+            password: req.body.password || 'default_placeholder_password',
             user_metadata: { full_name: name }
           });
 
@@ -1318,7 +1397,7 @@ async function startServer() {
               id: finalUserId,
               email: fallbackEmail,
               email_confirm: true,
-              password: 'default_placeholder_password',
+              password: req.body.password || 'default_placeholder_password',
               user_metadata: { full_name: name }
             });
             createUserError = retryRes.error;

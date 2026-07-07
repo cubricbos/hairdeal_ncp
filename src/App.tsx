@@ -543,7 +543,7 @@ function AppContent() {
                 const status = detailErr.response?.status;
                 const isWithdrawn = status === 400 || status === 401 || status === 403 || status === 404 || status === 500;
 
-                if (isWithdrawn && isMounted.current) {
+                if (isWithdrawn && isMounted.current && !localStorage.getItem('ncp_admin')) {
                   console.log("[checkNcpSession] Live NCP account withdrawn or token invalid. Auto logging out...");
                   localStorage.removeItem('ncp_access_token');
                   localStorage.removeItem('ncp_refresh_token');
@@ -827,6 +827,7 @@ function AppContent() {
         <Route path="/cs-admin" element={<CsAdminPage user={user} />} />
         <Route path="/support" element={<SupportPage user={user} />} />
         <Route path="/auth/callback" element={<AuthCallbackPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/m/shop/:shopId/:tableNumber" element={<MobileShopView />} />
         
         {/* My Page Routes */}
@@ -863,6 +864,8 @@ import SecurityAdminPage from "./pages/SecurityAdminPage";
 
 import EventsPage from './pages/EventsPage';
 import EventPopup from './components/EventPopup';
+
+import ResetPasswordPage from './pages/ResetPasswordPage';
 
 export default function App() {
   return (

@@ -234,6 +234,8 @@ export interface SiteSettings {
     subtitle: string;
     bgImage: string;
     bgColor: string;
+    adminId?: string;
+    adminPassword?: string;
   };
   popups?: {
     id: string;

@@ -3864,6 +3864,28 @@ ${currentHtml}`;
                         <span className="font-mono text-sm font-bold text-gray-600">{draft.parkingPage?.bgColor || '#111827'}</span>
                       </div>
                     </div>
+                    <div>
+                      <label className="block text-sm font-bold text-gray-700 mb-2">파킹 모드 관리자 ID</label>
+                      <input
+                        type="text"
+                        className="w-full border rounded-lg p-3 text-sm outline-none focus:ring-2 focus:ring-brand-primary"
+                        value={draft.parkingPage?.adminId || 'cubric.ceo@gmail.com'}
+                        onChange={(e) => setDraft({...draft, parkingPage: {...(draft.parkingPage || defaultSiteSettings.parkingPage!), adminId: e.target.value}})}
+                        placeholder="예: admin@example.com"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">파킹 페이지에 노출될 관리자 로그인용 이메일 주소입니다.</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-bold text-gray-700 mb-2">파킹 모드 관리자 비밀번호</label>
+                      <input
+                        type="text"
+                        className="w-full border rounded-lg p-3 text-sm outline-none focus:ring-2 focus:ring-brand-primary"
+                        value={draft.parkingPage?.adminPassword || 'cubric_default_password_1!'}
+                        onChange={(e) => setDraft({...draft, parkingPage: {...(draft.parkingPage || defaultSiteSettings.parkingPage!), adminPassword: e.target.value}})}
+                        placeholder="관리자 전용 접근 비밀번호"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">파킹 페이지에 노출될 관리자 로그인용 비밀번호입니다.</p>
+                    </div>
                   </div>
                 </div>
               </div>
