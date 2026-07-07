@@ -805,7 +805,7 @@ function AppContent() {
       <div className="blob blob-1"></div>
       <div className="blob blob-2"></div>
       
-      {!location.pathname.startsWith('/m/shop') && (
+      {!location.pathname.startsWith('/m/shop') && location.pathname !== '/admin/login' && (
         <div className={location.pathname === '/ai-hair-model' || location.pathname === '/ai-hair-model_app' ? 'hidden md:block' : ''}>
           <Navbar user={user} />
         </div>
@@ -845,7 +845,7 @@ function AppContent() {
         <Route path="/mypage/marketing" element={<MarketingPage />} />
         <Route path="/mypage/referral" element={<ReferralPage user={user} />} />
       </Routes>
-      {!location.pathname.startsWith('/m/shop') && (
+      {!location.pathname.startsWith('/m/shop') && location.pathname !== '/admin/login' && (
         <div className={location.pathname === '/ai-hair-model' || location.pathname === '/ai-hair-model_app' ? 'hidden md:block' : ''}>
           <Footer />
         </div>

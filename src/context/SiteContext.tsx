@@ -107,33 +107,34 @@ export const SiteProvider = ({ children }: { children: ReactNode }) => {
       // 1. 사용자/점주 계정 : NCP 서버 기반 (회원가입, 크레딧, 구독 상태 - x-cubric-designer-token/NCP 토큰 기반)
       // 2. 관리자 계정 : Supabase 서버 기반 (홈페이지 편집, 관리자 설정 및 파킹 페이지 제어 데이터, CS 어드민 데이터)
       // 홈페이지 편집 및 파킹 페이지 활성화 등은 관리자 전용이며 Supabase 세션 토큰이 필수적입니다.
-      const { data: { session } } = await supabase.auth.getSession();
-      let token = session?.access_token || null;
+      const isNcpAdmin = localStorage.getItem('ncp_admin') === 'true';
+      const ncpToken = localStorage.getItem('ncp_access_token');
+      let token = null;
+
+      if (isNcpAdmin && ncpToken) {
+        token = ncpToken;
+      } else {
+        const { data: { session } } = await supabase.auth.getSession();
+        token = session?.access_token || null;
+      }
 
       if (!token) {
-        // Fallback for NCP system admin token
-        const ncpToken = localStorage.getItem('ncp_access_token');
-        const isNcpAdmin = localStorage.getItem('ncp_admin') === 'true';
-        if (ncpToken && isNcpAdmin) {
-          token = ncpToken;
-        } else {
-          // Construct auto-created fallback administrative token for server-side verification
-          const payload = {
-            id: "d6bf71df962a4556a9f1cb53d8c57285",
-            email: "cubric.ceo@gmail.com",
-            name: "System Admin (Auto Created Fallback)",
-            mobileNumber: "010-1234-5678"
-          };
-          const base64Payload = btoa(unescape(encodeURIComponent(JSON.stringify(payload))))
-            .replace(/=/g, '')
-            .replace(/\+/g, '-')
-            .replace(/\//g, '_');
-          token = `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.${base64Payload}.signature`;
-          
-          localStorage.setItem('ncp_access_token', token);
-          localStorage.setItem('ncp_admin', 'true');
-          console.log('[SiteContext] Synthesized administrator fallback token for remote API connection.');
-        }
+        // Construct auto-created fallback administrative token for server-side verification
+        const payload = {
+          id: "d6bf71df962a4556a9f1cb53d8c57285",
+          email: "cubric.ceo@gmail.com",
+          name: "System Admin (Auto Created Fallback)",
+          mobileNumber: "010-1234-5678"
+        };
+        const base64Payload = btoa(unescape(encodeURIComponent(JSON.stringify(payload))))
+          .replace(/=/g, '')
+          .replace(/\+/g, '-')
+          .replace(/\//g, '_');
+        token = `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.${base64Payload}.signature`;
+        
+        localStorage.setItem('ncp_access_token', token);
+        localStorage.setItem('ncp_admin', 'true');
+        console.log('[SiteContext] Synthesized administrator fallback token for remote API connection.');
       }
 
       const response = await fetch('/api/admin/site-settings', {

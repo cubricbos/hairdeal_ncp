@@ -576,8 +576,6 @@ async function startServer() {
   };
 
   const handleSocialLoginSuccess = async (res: any, provider: string, profile: any) => {
-    if (!getSupabaseAdmin()) return res.status(500).json({ error: 'Supabase admin not configured' });
-    
     try {
       const rawEmail = profile.email || `${profile.id}@${provider}.social`;
       const email = rawEmail.trim().toLowerCase();
@@ -597,7 +595,47 @@ async function startServer() {
       let matchedDesignerPhone = phone;
       let matchedDesignerEmail = email;
 
-      // 1. Try to search and match real-time NCP designer list
+      // 1. Determine if this account is a Supabase administrator (via email patterns or database settings)
+      let isSystemAdminEmail = false;
+      let ppAdminId = 'cubric.ceo@gmail.com';
+      try {
+        const client = getSupabaseClient();
+        const { data: dbSettings } = await client
+          .from('site_settings')
+          .select('settings')
+          .eq('id', 'default')
+          .maybeSingle();
+        if (dbSettings?.settings?.parkingPage?.adminId) {
+          ppAdminId = dbSettings.settings.parkingPage.adminId;
+        }
+      } catch (dbErr) {
+        console.warn("[SocialSync] Failed to fetch current site settings:", dbErr);
+      }
+
+      if (email.toLowerCase() === 'cubric.ceo@gmail.com' || 
+          email.toLowerCase().includes('cubric') || 
+          email.toLowerCase().trim() === ppAdminId.toLowerCase().trim()) {
+        isSystemAdminEmail = true;
+      }
+
+      if (!isSystemAdminEmail && getSupabaseAdmin()) {
+        try {
+          const { data: matchedProfile } = await getSupabaseAdmin()
+            .from('profiles')
+            .select('role')
+            .eq('email', email)
+            .maybeSingle();
+          if (matchedProfile && (matchedProfile.role === 'admin' || matchedProfile.role === 'super_admin')) {
+            isSystemAdminEmail = true;
+          }
+        } catch (profileErr) {
+          console.warn("[SocialSync] Profiles role check failed:", profileErr);
+        }
+      }
+
+      console.log(`[SocialSync] Checking login for email: ${email}. isSystemAdminEmail: ${isSystemAdminEmail}`);
+
+      // 2. Try to search and match real-time NCP designer list
       try {
         console.log(`[SocialSync] Attempting to match social profile (${email}, ${phone}) with NCP designer list...`);
         const coreUrl = process.env.CORE_SERVER_URL || 'http://hairdeal.cubric.io';
@@ -644,7 +682,7 @@ async function startServer() {
         console.warn(`[SocialSync] Searching NCP designers matching failed:`, err.message);
       }
 
-      // 2. If no matched designer, auto-register a new designer profile on NCP Server
+      // 3. If no matched designer, auto-register a new designer profile on NCP Server
       if (!matchedDesignerId) {
         console.log(`[SocialSync] No matching NCP designer found. Auto-registering new designer profile on NCP...`);
         try {
@@ -730,7 +768,85 @@ async function startServer() {
         ? ncpId
         : `${ncpId.substring(0, 8)}-${ncpId.substring(8, 12)}-${ncpId.substring(12, 16)}-${ncpId.substring(16, 20)}-${ncpId.substring(20)}`;
 
-      // 4. Synchronize 1:1 with Supabase Auth & Profile database
+      // 4. Generate precise NCP tokens for Client LocalStorage
+      const jwtSecret = process.env.VITE_NCP_JWT_DESIGNER_SECRET_KEY || process.env.NCP_JWT_SECRET || '0cub6zbqmflr0ric1d';
+      const cleanNcpId = ncpId.replace(/-/g, '');
+      const ncpPayload: any = { id: cleanNcpId, name: finalName, email: finalEmail, mobileNumber: finalPhone };
+      const ncpToken = jwt.sign(ncpPayload, jwtSecret, { algorithm: 'HS256', expiresIn: '1d' });
+      const ncpRefreshToken = jwt.sign(ncpPayload, jwtSecret, { algorithm: 'HS256', expiresIn: '14d' });
+
+      // 5. Check if it's NOT an admin - standard NCP users log in using tokens without Supabase
+      if (!isSystemAdminEmail) {
+        console.log(`[SocialSync] Logging in standard NCP user ${finalEmail} solely via tokens.`);
+        try {
+          const ncpPayloadToNcp = {
+            id: cleanNcpId,
+            name: finalName || '사용자',
+            mobileNumber: finalPhone || '01000000000',
+            email: finalEmail,
+            loginId: finalEmail,
+            password: password,
+            provider: provider,
+            marketingTerms: true,
+            pushTerms: false
+          };
+          await axios.post('https://cubric-account-service-755716171569.asia-northeast3.run.app/designer', ncpPayloadToNcp);
+        } catch (e: any) {
+          console.warn(`[SocialSync] Extra NCP registration warning:`, e.message);
+        }
+
+        return res.send(`
+          <html>
+            <body>
+              <div style="font-family: sans-serif; text-align: center; margin-top: 50px;">
+                <h2>소셜 로그인 처리 중...</h2>
+                <p>잠시만 기다려주세요.</p>
+              </div>
+              <script>
+                if (window.opener) {
+                  window.opener.postMessage({ 
+                    type: 'OAUTH_AUTH_SUCCESS', 
+                    session: null,
+                    ncpToken: { token: "${ncpToken}", refreshToken: "${ncpRefreshToken}" }
+                  }, window.location.origin);
+                  setTimeout(() => window.close(), 500);
+                } else {
+                  window.location.href = '/';
+                }
+              </script>
+            </body>
+          </html>
+        `);
+      }
+
+      // 6. Supabase Admin check (Only reached if the user is a designated administrator)
+      if (!getSupabaseAdmin()) {
+        console.warn("[SocialSync] Admin user logged in but getSupabaseAdmin() is not configured. Falling back to NCP tokens only.");
+        return res.send(`
+          <html>
+            <body>
+              <div style="font-family: sans-serif; text-align: center; margin-top: 50px;">
+                <h2>소셜 로그인 처리 중...</h2>
+                <p>잠시만 기다려주세요.</p>
+              </div>
+              <script>
+                if (window.opener) {
+                  window.opener.postMessage({ 
+                    type: 'OAUTH_AUTH_SUCCESS', 
+                    session: null,
+                    ncpToken: { token: "${ncpToken}", refreshToken: "${ncpRefreshToken}" }
+                  }, window.location.origin);
+                  setTimeout(() => window.close(), 500);
+                } else {
+                  window.location.href = '/';
+                }
+              </script>
+            </body>
+          </html>
+        `);
+      }
+
+      // Synchronize 1:1 with Supabase Auth & Profile database
       let userId = '';
       const { data: matchedProfile } = await getSupabaseAdmin().from('profiles').select('id').eq('email', finalEmail).maybeSingle();
       
@@ -803,7 +919,7 @@ async function startServer() {
                   id: userId,
                   email: finalEmail,
                   full_name: finalName,
-                  role: 'user'
+                  role: 'admin'
                 }).select().maybeSingle();
               } else {
                 console.error(`[SocialSync] Could not recover user. original error: ${error.message}, linkError: ${linkError?.message}`);
@@ -831,9 +947,9 @@ async function startServer() {
 
       // 4.5 Register to NCP Backend to prevent silent 401 Auto Logout
       try {
-        const cleanNcpId = userId.replace(/-/g, '');
+        const cleanNcpIdForAdmin = userId.replace(/-/g, '');
         const ncpPayload = {
-          id: cleanNcpId,
+          id: cleanNcpIdForAdmin,
           name: finalName || '사용자',
           mobileNumber: finalPhone || '01000000000',
           email: finalEmail,
@@ -843,7 +959,6 @@ async function startServer() {
           marketingTerms: true,
           pushTerms: false
         };
-        const axios = require('axios');
         await axios.post('https://cubric-account-service-755716171569.asia-northeast3.run.app/designer', ncpPayload);
         console.log(`[SocialSync] Ensured NCP Designer registration.`);
       } catch (e: any) {
@@ -860,13 +975,6 @@ async function startServer() {
       if (signInError || !sessionData.session) {
         throw signInError || new Error('Failed to create login session context on Supabase');
       }
-
-      // 6. Generate precise NCP tokens for Client LocalStorage
-      const jwtSecret = process.env.VITE_NCP_JWT_DESIGNER_SECRET_KEY || process.env.NCP_JWT_SECRET || '0cub6zbqmflr0ric1d';
-      const cleanNcpId = userId.replace(/-/g, '');
-      const ncpPayload: any = { id: cleanNcpId, name: finalName, email: finalEmail, mobileNumber: finalPhone };
-      const ncpToken = jwt.sign(ncpPayload, jwtSecret, { algorithm: 'HS256', expiresIn: '1d' });
-      const ncpRefreshToken = jwt.sign(ncpPayload, jwtSecret, { algorithm: 'HS256', expiresIn: '14d' });
 
       // Return fully functional response HTML and trigger parents OAuth message listener
       res.send(`
@@ -1119,6 +1227,21 @@ async function startServer() {
 
       let isAuthorized = false;
 
+      // Fetch current site_settings first to get custom admin credentials
+      let ppAdminId = 'cubric.ceo@gmail.com';
+      try {
+        const { data: dbSettings } = await getSupabaseAdmin()
+          .from('site_settings')
+          .select('settings')
+          .eq('id', 'default')
+          .maybeSingle();
+        if (dbSettings?.settings?.parkingPage?.adminId) {
+          ppAdminId = dbSettings.settings.parkingPage.adminId;
+        }
+      } catch (dbErr) {
+        console.warn("[Site Settings Auth] Failed to fetch current site settings:", dbErr);
+      }
+
       // 1. Fallback: Decode token locally and authorize if it matches system administrator parameters
       const authHeader = req.headers.authorization;
       console.log("[DEBUG /api/admin/site-settings] Auth Header:", authHeader?.substring(0, 30) + '...');
@@ -1141,7 +1264,8 @@ async function startServer() {
             if (decoded && (
               decoded.email?.toLowerCase().includes('cubric') || 
               decoded.email?.toLowerCase().includes('admin') ||
-              decoded.id === 'd6bf71df962a4556a9f1cb53d8c57285'
+              decoded.id === 'd6bf71df962a4556a9f1cb53d8c57285' ||
+              decoded.email?.toLowerCase().trim() === ppAdminId.toLowerCase().trim()
             )) {
               isAuthorized = true;
               console.log("[Site Settings Auth] Decoupled authorization approved via JWT credentials:", decoded.email);
@@ -1155,7 +1279,10 @@ async function startServer() {
       // 2. Standard flow validation
       console.log("[DEBUG /api/admin/site-settings] authInfo:", authInfo);
       if (authInfo) {
-        const isSystemAdminEmail = authInfo.email.toLowerCase() === 'cubric.ceo@gmail.com' || authInfo.email.toLowerCase().includes('cubric');
+        const isSystemAdminEmail = 
+          authInfo.email.toLowerCase() === 'cubric.ceo@gmail.com' || 
+          authInfo.email.toLowerCase().includes('cubric') ||
+          authInfo.email.toLowerCase().trim() === ppAdminId.toLowerCase().trim();
         
         let isSystemAdminRole = false;
         try {
