@@ -608,16 +608,12 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
         const ppAdminId = settings?.parkingPage?.adminId || 'cubric.ceo@gmail.com';
         const ppAdminPw = settings?.parkingPage?.adminPassword || 'cubric_default_password_1!';
 
-        const isLocalBypass = 
-          (email.trim() === 'admin' && password.trim() === 'admin') ||
-          (email.trim() === 'admin@cubric.io' && password.trim() === 'password') ||
-          (email.trim() === 'cubric.ceo@gmail.com' && password.trim() === 'admin') ||
-          (email.trim() === ppAdminId && password.trim() === ppAdminPw);
+        const isLocalBypass = (email.trim() === ppAdminId.trim() && password.trim() === ppAdminPw.trim());
 
         if (isLocalBypass) {
           const payload = {
             id: "d6bf71df962a4556a9f1cb53d8c57285", // Matching typical admin ID
-            email: email.includes('@') ? email.trim() : "cubric.ceo@gmail.com",
+            email: ppAdminId.trim(),
             name: "관리자 (System Admin)",
             mobileNumber: "010-1234-5678"
           };

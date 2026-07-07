@@ -61,23 +61,6 @@ export default function ParkingPage() {
           />
         )}
 
-        {(pp.adminId || pp.adminPassword) && (
-          <div className="mt-12 text-center inline-block">
-            <div className={`rounded-xl p-4 border text-left ${isDark ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`}>
-              <p className={`text-sm font-semibold mb-2 ${isDark ? 'text-white/80' : 'text-gray-700'}`}>관리자 전용 접근</p>
-              <div className={`text-xs space-y-1 ${isDark ? 'text-white/60' : 'text-gray-500'}`}>
-                {pp.adminId && <p>ID : {pp.adminId}</p>}
-                {pp.adminPassword && <p>PW : {pp.adminPassword}</p>}
-              </div>
-              <button 
-                onClick={() => navigate('/admin/login')}
-                className={`mt-3 w-full px-4 py-2 border rounded-lg text-sm font-medium transition-colors ${isDark ? 'bg-white/10 border-white/20 text-white hover:bg-white/20' : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'}`}
-              >
-                관리자 로그인
-              </button>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

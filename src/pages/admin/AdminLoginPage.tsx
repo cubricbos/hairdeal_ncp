@@ -20,18 +20,13 @@ export default function AdminLoginPage() {
     const ppAdminId = settings?.parkingPage?.adminId || 'cubric.ceo@gmail.com';
     const ppAdminPw = settings?.parkingPage?.adminPassword || 'cubric_default_password_1!';
 
-    // Dynamic bypass for admin local development / system admin login
-    const isLocalBypass = 
-      (accountId.trim() === 'admin' && password.trim() === 'admin') || 
-      (accountId.trim() === 'admin@cubric.io' && password.trim() === 'password') ||
-      (accountId.trim() === 'cubric.ceo@gmail.com' && password.trim() === 'admin') ||
-      (accountId.trim() === ppAdminId && password.trim() === ppAdminPw);
+    const isParkingAdmin = (accountId.trim() === ppAdminId.trim() && password.trim() === ppAdminPw.trim());
 
-    if (isLocalBypass) {
+    if (isParkingAdmin) {
       try {
         const payload = {
           id: "d6bf71df962a4556a9f1cb53d8c57285", // Matching typical admin ID
-          email: accountId.includes('@') ? accountId.trim() : "cubric.ceo@gmail.com",
+          email: ppAdminId.trim(),
           name: "관리자 (System Admin)",
           mobileNumber: "010-1234-5678"
         };
@@ -47,43 +42,10 @@ export default function AdminLoginPage() {
       } catch (bypassErr) {
         console.error('Bypass creation error:', bypassErr);
       }
-    }
-
-    try {
-      // POST /admin/login API 호출 (AdminLoginDto: { accountId, password })
-      const { data } = await accountClient.post('/admin/login', {
-        accountId,
-        password
-      });
-
-      if (data?.token || data?.accessToken) {
-         localStorage.setItem('ncp_access_token', data.token || data.accessToken);
-      }
-      localStorage.setItem('ncp_admin', 'true');
-
-      // 로그인 성공 시 관리자 전용 대시보드로 이동
-      navigate('/admin');
-    } catch (err: any) {
-      console.error('Admin Login Error:', err);
-      // Fallback in case of NCP database error but correct emails
-      if (accountId.includes('@cubric') || accountId === 'admin') {
-        const payload = {
-          id: "d6bf71df962a4556a9f1cb53d8c57285",
-          email: accountId.includes('@') ? accountId.trim() : "cubric.ceo@gmail.com",
-          name: "관리자 (System Admin Fallback)",
-          mobileNumber: "010-1234-5678"
-        };
-        const base64Payload = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
-        const dummyToken = `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.${base64Payload}.signature`;
-        localStorage.setItem('ncp_access_token', dummyToken);
-        localStorage.setItem('ncp_admin', 'true');
-        navigate('/admin');
-        setLoading(false);
-        return;
-      }
-      setError('접근이 거부되었습니다. 관리자 아이디 및 비밀번호를 확인해주세요.');
-    } finally {
+    } else {
+      setError('접근이 거부되었습니다. 등록된 관리자 아이디 및 비밀번호를 확인해주세요.');
       setLoading(false);
+      return;
     }
   };
 
