@@ -323,6 +323,107 @@ export default function AdminPage({ user }: { user: User | null }) {
   const [viewHistoryUserId, setViewHistoryUserId] = useState<string | null>(null);
   const [viewHistoryUserName, setViewHistoryUserName] = useState<string | null>(null);
   const [userHistory, setUserHistory] = useState<any[]>([]);
+  const [userHistoryPage, setUserHistoryPage] = useState(1);
+  const [userHistoryHasMore, setUserHistoryHasMore] = useState(true);
+  const [userHistoryLoadingMore, setUserHistoryLoadingMore] = useState(false);
+  const [userHistoryStats, setUserHistoryStats] = useState({ total: 0, friend: 0, monthUsed: 0, loading: false });
+  const [creditHistoryFilter, setCreditHistoryFilter] = useState<'all' | 'earned' | 'deducted'>('all');
+  const resolvedSignupsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!profiles || profiles.length === 0) return;
+
+    // Find profiles with missing created_at
+    const profilesWithMissingDate = profiles.filter(
+      p => (!p.created_at || p.created_at === "null") && !resolvedSignupsRef.current.has(p.id)
+    );
+
+    if (profilesWithMissingDate.length === 0) return;
+
+    // Process them sequentially to be friendly to APIs
+    const resolveSignupDates = async () => {
+      // Mark as processed
+      profilesWithMissingDate.forEach(p => resolvedSignupsRef.current.add(p.id));
+
+      const updatedProfilesMap: Record<string, string> = {};
+
+      for (const p of profilesWithMissingDate) {
+        try {
+          const profileInfo = p;
+          const targetDesignerId = profileInfo?.ncp_account_id || profileInfo?.accountId || profileInfo?.ncp_designer_id || p.id;
+          
+          let dateStr: string | null = null;
+
+          // 1. Try Supabase credit_transactions
+          const { data: sbTxs, error: sbErr } = await supabase
+            .from("credit_transactions")
+            .select("created_at, description, type")
+            .eq("user_id", p.id);
+
+          if (!sbErr && sbTxs && sbTxs.length > 0) {
+            const signupTx = sbTxs.find(t => t.type === 'earned_welcome' || (t.description && (t.description.includes('가입') || t.description.includes('회원가입') || t.description.includes('웰컴'))));
+            if (signupTx) {
+              dateStr = signupTx.created_at;
+            } else {
+              const sorted = [...sbTxs].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+              dateStr = sorted[0]?.created_at || null;
+            }
+          }
+
+          // 2. Try NCP credit history API
+          if (!dateStr) {
+            const { data: { session } } = await supabase.auth.getSession();
+            const token = session?.access_token || localStorage.getItem('ncp_access_token');
+            if (token) {
+              const res = await fetch(`/api/admin/user-credit-history?designerId=${targetDesignerId}&pageNo=1&pageSize=50&month=12`, {
+                headers: {
+                  'Authorization': `Bearer ${token}`
+                }
+              });
+              if (res.ok) {
+                const data = await res.json();
+                const items = data?.content || data?.data || data?.items || data;
+                if (items && Array.isArray(items) && items.length > 0) {
+                  const signupTx = items.find((t: any) => t.type === 'SIGNUP' || (t.description && (t.description.includes('가입') || t.description.includes('회원가입') || t.description.includes('웰컴'))));
+                  if (signupTx) {
+                    dateStr = signupTx.date || signupTx.createdAt || null;
+                  } else {
+                    const sorted = [...items].sort((a, b) => new Date(a.date || a.createdAt || 0).getTime() - new Date(b.date || b.createdAt || 0).getTime());
+                    dateStr = sorted[0]?.date || sorted[0]?.createdAt || null;
+                  }
+                }
+              }
+            }
+          }
+
+          if (dateStr) {
+            updatedProfilesMap[p.id] = dateStr;
+            console.log(`[AdminPage] Resolved missing signup date for ${p.full_name || p.email} (${p.id}) to ${dateStr}`);
+          }
+        } catch (err) {
+          console.warn("Failed resolving signup date for profile", p.id, err);
+        }
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+
+      if (Object.keys(updatedProfilesMap).length > 0) {
+        setProfiles(prev => prev.map(p => {
+          if (updatedProfilesMap[p.id]) {
+            return {
+              ...p,
+              created_at: updatedProfilesMap[p.id]
+            };
+          }
+          return p;
+        }));
+      }
+    };
+
+    resolveSignupDates();
+  }, [profiles]);
+
+  const [designerCreditHistory, setDesignerCreditHistory] = useState<any[]>([]);
+  const [loadingDesignerCreditHistory, setLoadingDesignerCreditHistory] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [selectedDesignerDetail, setSelectedDesignerDetail] = useState<any | null>(null);
   const [fetchingDesignerDetail, setFetchingDesignerDetail] = useState(false);
@@ -332,52 +433,6 @@ export default function AdminPage({ user }: { user: User | null }) {
     setSelectedDesignerDetail(null);
     const profileId = profile.id;
     let ncpTxs: any[] = [];
-    try {
-      // Fetch credit history sync for this designer directly from NCP
-      let allNcpTxs: any[] = [];
-      let currentPage = 1;
-      let keepFetching = true;
-      while (keepFetching) {
-         try {
-           const res = await apiClient.get('/faceswap/credit/history', { 
-              params: { month: 12, filter: 'ALL', pageNo: currentPage, pageSize: 50, designerId: profileId } 
-           });
-           const items = res.data?.content || res.data?.data || res.data?.items || res.data;
-           if (items && Array.isArray(items) && items.length > 0) {
-              allNcpTxs = [...allNcpTxs, ...items];
-              const totalCount = res.data?.totalElements || res.data?.totalCount || 0;
-              if (totalCount > 0 && allNcpTxs.length < totalCount) {
-                  currentPage++;
-              } else {
-                  keepFetching = false;
-              }
-           } else {
-              keepFetching = false;
-           }
-         } catch (e1) {
-           try {
-             const res = await accountClient.get('/faceswap/credit/history', { 
-                params: { month: 12, filter: 'ALL', pageNo: currentPage, pageSize: 50, designerId: profileId } 
-             });
-             const items = res.data?.content || res.data?.data || res.data?.items || res.data;
-             if (items && Array.isArray(items) && items.length > 0) {
-                allNcpTxs = [...allNcpTxs, ...items];
-                const totalCount = res.data?.totalElements || res.data?.totalCount || 0;
-                if (totalCount > 0 && allNcpTxs.length < totalCount) {
-                    currentPage++;
-                } else {
-                    keepFetching = false;
-                }
-             } else {
-                keepFetching = false;
-             }
-           } catch (e2) {
-             keepFetching = false;
-           }
-         }
-      }
-      ncpTxs = allNcpTxs;
-    } catch(e) { console.log('Credit fetch err'); }
 
     try {
       // Use core admin designer detail API instead of accountClient
@@ -393,7 +448,7 @@ export default function AdminPage({ user }: { user: User | null }) {
         mobileNumber: profile.mobileNumber || data.mobileNumber || null,
         career: null,
         introduce: data.introduce || data.introduction || null,
-        ncpCreditHistory: ncpTxs, 
+         
         supaProfile: profile 
       });
     } catch (err: any) {
@@ -407,7 +462,7 @@ export default function AdminPage({ user }: { user: User | null }) {
            email: profile.email || data.email || null,
            mobileNumber: profile.mobileNumber || data.mobileNumber || null,
            career: null,
-           ncpCreditHistory: ncpTxs, 
+            
            supaProfile: profile 
         });
       } catch (fallbackErr) {
@@ -419,67 +474,39 @@ export default function AdminPage({ user }: { user: User | null }) {
     }
   };
 
-  const fetchUserHistory = async (userId: string, userName: string) => {
+  const fetchUserHistory = async (userId: string, userName: string, totalCredits: number = 0) => {
     setViewHistoryUserId(userId);
     setViewHistoryUserName(userName);
     setLoadingHistory(true);
-    let ncpTxs: any[] = [];
-    
+    setUserHistoryPage(1);
+    setUserHistoryHasMore(true);
+    setUserHistory([]);
+    setCreditHistoryFilter('all');
+    setUserHistoryStats({ total: totalCredits, friend: 0, monthUsed: 0, loading: true });
+
     try {
-      // Find user to map ncp_designer_id
       const profileInfo = profiles.find((p) => p.id === userId);
-      const targetDesignerId = profileInfo?.ncp_designer_id || userId;
-      
-      let allNcpTxs: any[] = [];
-      let currentPage = 1;
-      let keepFetching = true;
+      const targetDesignerId = profileInfo?.ncp_account_id || profileInfo?.accountId || profileInfo?.ncp_designer_id || userId;
 
-      while (keepFetching) {
-         try {
-           const res = await apiClient.get('/faceswap/credit/history', { 
-              params: { month: 12, filter: 'ALL', pageNo: currentPage, pageSize: 50, designerId: targetDesignerId } 
-           });
-           const items = res.data?.content || res.data?.data || res.data?.items || res.data;
-           if (items && Array.isArray(items) && items.length > 0) {
-              allNcpTxs = [...allNcpTxs, ...items];
-              const totalCount = res.data?.totalElements || res.data?.totalCount || 0;
-              if (totalCount > 0 && allNcpTxs.length < totalCount) {
-                  currentPage++;
-              } else {
-                  keepFetching = false;
-              }
-           } else {
-              keepFetching = false;
-           }
-         } catch (e1) {
-           console.log("apiClient /faceswap/credit/history not hosted on core. Quietly attempting account server query.");
-           const res = await accountClient.get('/faceswap/credit/history', { 
-              params: { month: 12, filter: 'ALL', pageNo: currentPage, pageSize: 50, designerId: targetDesignerId } 
-           });
-           const items = res.data?.content || res.data?.data || res.data?.items || res.data;
-           if (items && Array.isArray(items) && items.length > 0) {
-              allNcpTxs = [...allNcpTxs, ...items];
-              const totalCount = res.data?.totalElements || res.data?.totalCount || 0;
-              if (totalCount > 0 && allNcpTxs.length < totalCount) {
-                  currentPage++;
-              } else {
-                  keepFetching = false;
-              }
-           } else {
-              keepFetching = false;
-           }
+      // 1. Fetch first page of NCP
+      const res = await fetch(`/api/admin/user-credit-history?designerId=${targetDesignerId}&pageNo=1&pageSize=10&month=12`, {
+         headers: {
+           'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`
          }
+      });
+      
+      let initialTxs: any[] = [];
+      let totalCount = 0;
+
+      if (res.ok) {
+        const data = await res.json();
+        const items = data?.content || data?.data || data?.items || data;
+        if (items && Array.isArray(items)) {
+          initialTxs = items;
+          totalCount = data?.totalElements || data?.totalCount || 0;
+        }
       }
 
-      if (allNcpTxs.length > 0) {
-        ncpTxs = allNcpTxs;
-      }
-    } catch (err) {
-      console.log("NCP specialized credit history endpoints are not hosted. Seamlessly fall back to Supabase transactions.");
-    }
-    
-    try {
-      if (ncpTxs.length > 0) {
         const getCreditTypeDescription = (type: string, amount: number) => {
           const map: Record<string, string> = {
             CHARGE: '크레딧 충전',
@@ -500,30 +527,174 @@ export default function AdminPage({ user }: { user: User | null }) {
           return map[type] || (amount > 0 ? '크레딧 적립' : '크레딧 차감');
         };
 
-        const mappedTxs = ncpTxs.map((t: any) => ({
+      if (initialTxs.length > 0) {
+        const mappedTxs = initialTxs.map((t: any) => ({
           id: t.id || t.pointHistoryId || Math.random().toString(),
           type: (t.amount > 0) ? 'earned' : 'deducted',
+          _originalType: t.type,
           amount: Math.abs(t.amount || t.point || 0),
           description: t.description || getCreditTypeDescription(t.type, t.amount),
           created_at: t.date || t.createdAt || new Date().toISOString()
         }));
         setUserHistory(mappedTxs);
+        setUserHistoryHasMore(initialTxs.length < totalCount);
       } else {
-        // Fallback to Supabase if no NCP rows found
+        // Fallback to Supabase
         const { data, error } = await supabase
           .from("credit_transactions")
           .select("*")
           .eq("user_id", userId)
-          .order("created_at", { ascending: false });
-
-        if (error) throw error;
-        setUserHistory(data || []);
+          .order("created_at", { ascending: false })
+          .limit(10);
+        if (!error && data) {
+          setUserHistory(data);
+          setUserHistoryHasMore(data.length === 10);
+        } else {
+          setUserHistoryHasMore(false);
+        }
       }
+
+      // Background task to compute stats
+      (async () => {
+        try {
+          let allTxs: any[] = [];
+          const MAX_PAGES = 5; // Fetch up to 250 items to estimate month usage and friends (or full if we want)
+          let keepFetching = true;
+          let p = 1;
+          while(keepFetching && p <= MAX_PAGES) {
+            const r = await fetch(`/api/admin/user-credit-history?designerId=${targetDesignerId}&pageNo=${p}&pageSize=50&month=12`, {
+               headers: {
+                 'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`
+               }
+            });
+            if (!r.ok) break;
+            const d = await r.json();
+            const items = d?.content || d?.data || d?.items || d;
+            if (items && Array.isArray(items) && items.length > 0) {
+              allTxs = [...allTxs, ...items];
+              if (allTxs.length >= (d?.totalElements || d?.totalCount || 0)) {
+                keepFetching = false;
+              } else {
+                p++;
+              }
+            } else {
+              keepFetching = false;
+            }
+          }
+          
+          let monthUsed = 0;
+          let friend = 0;
+          const now = new Date();
+          const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+          allTxs.forEach(t => {
+            const tDate = new Date(t.date || t.createdAt);
+            if (t.amount < 0 && tDate >= firstDayOfMonth) {
+              monthUsed += Math.abs(t.amount);
+            }
+            if (t.type === 'REFERRAL') {
+              friend += Math.abs(t.amount);
+            }
+          });
+
+          // Also check supabase for referrals if not enough in NCP
+          const { data: dbRef } = await supabase.from('credit_transactions').select('amount').eq('user_id', userId).eq('type', 'earned').ilike('description', '%친구%');
+          const dbFriend = dbRef?.reduce((sum, r) => sum + r.amount, 0) || 0;
+          
+          setUserHistoryStats({
+            total: totalCredits,
+            friend: Math.max(friend, dbFriend),
+            monthUsed: monthUsed,
+            loading: false
+          });
+        } catch (e) {
+          console.warn("Background stats fetch failed", e);
+          setUserHistoryStats(prev => ({ ...prev, loading: false }));
+        }
+      })();
+
     } catch (err) {
       console.error("Error fetching user history:", err);
-      // alert("이력 조회 중 오류가 발생했습니다.");
+      setUserHistory([]);
     } finally {
       setLoadingHistory(false);
+    }
+  };
+
+  const loadMoreUserHistory = async () => {
+    if (userHistoryLoadingMore || !userHistoryHasMore || !viewHistoryUserId) return;
+    setUserHistoryLoadingMore(true);
+    try {
+      const nextPage = userHistoryPage + 1;
+      const profileInfo = profiles.find((p) => p.id === viewHistoryUserId);
+      const targetDesignerId = profileInfo?.ncp_account_id || profileInfo?.accountId || profileInfo?.ncp_designer_id || viewHistoryUserId;
+
+      const res = await fetch(`/api/admin/user-credit-history?designerId=${targetDesignerId}&pageNo=${nextPage}&pageSize=10&month=12`, {
+         headers: {
+           'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`
+         }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const items = data?.content || data?.data || data?.items || data;
+        
+        const getCreditTypeDescription = (type: string, amount: number) => {
+          const map: Record<string, string> = {
+            CHARGE: '크레딧 충전',
+            MEMBERSHIP_BONUS: '멤버십 가입 보너스',
+            REFERRAL: '친구 추천 보상',
+            SIGNUP: '신규 가입 보상',
+            DAILY: '출석 보상',
+            AI_FACE_SWAP: 'AI 얼굴 합성 사용',
+            AI_FACE_SWAP_MEMBERSHIP: 'AI 얼굴 합성 (멤버십)',
+            AI_VIDEO: 'AI 영상 생성 사용',
+            AI_VIDEO_MEMBERSHIP: 'AI 영상 생성 (멤버십)',
+            REFUND_AI_FACE_SWAP: 'AI 얼굴 합성 환불',
+            REFUND_AI_FACE_SWAP_MEMBERSHIP: 'AI 얼굴 합성 환불 (멤버십)',
+            REFUND_AI_VIDEO: 'AI 영상 생성 환불',
+            REFUND_AI_VIDEO_MEMBERSHIP: 'AI 영상 생성 환불 (멤버십)',
+            REVOKE_MEMBERSHIP_CREDIT: '멤버십 크레딧 회수'
+          };
+          return map[type] || (amount > 0 ? '크레딧 적립' : '크레딧 차감');
+        };
+
+        if (items && Array.isArray(items) && items.length > 0) {
+          const mappedTxs = items.map((t: any) => ({
+            id: t.id || t.pointHistoryId || Math.random().toString(),
+            type: (t.amount > 0) ? 'earned' : 'deducted',
+            _originalType: t.type,
+            amount: Math.abs(t.amount || t.point || 0),
+            description: t.description || getCreditTypeDescription(t.type, t.amount),
+            created_at: t.date || t.createdAt || new Date().toISOString()
+          }));
+          setUserHistory(prev => [...prev, ...mappedTxs]);
+          setUserHistoryPage(nextPage);
+          
+          const totalCount = data?.totalElements || data?.totalCount || 0;
+          setUserHistoryHasMore((userHistory.length + items.length) < totalCount);
+        } else {
+          setUserHistoryHasMore(false);
+        }
+      } else {
+        // Fallback Supabase load more
+        const { data, error } = await supabase
+          .from("credit_transactions")
+          .select("*")
+          .eq("user_id", viewHistoryUserId)
+          .order("created_at", { ascending: false })
+          .range(userHistory.length, userHistory.length + 9);
+        if (!error && data && data.length > 0) {
+          setUserHistory(prev => [...prev, ...data]);
+          setUserHistoryPage(nextPage);
+          setUserHistoryHasMore(data.length === 10);
+        } else {
+          setUserHistoryHasMore(false);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load more history", e);
+    } finally {
+      setUserHistoryLoadingMore(false);
     }
   };
 
@@ -808,6 +979,7 @@ export default function AdminPage({ user }: { user: User | null }) {
 
           return {
             id: designer.id || designer.accountId || designer.designerId,
+            ncp_account_id: designer.accountId || designer.id,
             email: designer.email || designer.accountId,
             full_name: designer.name || '이름 없음',
             avatar_url: ncpAvatarUrl,
@@ -960,7 +1132,8 @@ export default function AdminPage({ user }: { user: User | null }) {
             full_name: ncpData.name || u.name || u.full_name,
             avatar_url: ncpAvatarUrl,
             business_status: typeof ncpData.businessStatus === 'string' ? ncpData.businessStatus : (u.business_status || u.status || 'active'),
-            ncp_synced: !!(ncpData.email || u.email || ncpData.accountId || u.id), // Custom flag to show if they exist in NCP
+            ncp_synced: !!(ncpData.email || u.email || ncpData.accountId || u.id),
+            ncp_account_id: ncpData.accountId || u.id,
             created_at: getDesignerCreatedAt(ncpData) || u.created_at,
             provider: realProvider || ncpData.provider || u.provider || ncpData.signedBy || ncpData.loginType || ncpData.snsType || null,
             signedBy: realProvider || ncpData.signedBy || u.signedBy || null,
@@ -3149,7 +3322,7 @@ export default function AdminPage({ user }: { user: User | null }) {
                               </td>
                             )}
                             <td className="p-5 text-sm text-gray-500">
-                              {profile.ncp_synced && profile.created_at
+                              {profile.created_at
                                 ? formatDate(profile.created_at)
                                 : "null"}
                             </td>
@@ -3183,6 +3356,7 @@ export default function AdminPage({ user }: { user: User | null }) {
                                     fetchUserHistory(
                                       profile.id,
                                       profile.full_name || profile.email,
+                                      profile.credits
                                     )
                                   }
                                   className="text-indigo-500 hover:text-indigo-700 p-2 hover:bg-indigo-50 rounded-lg transition-colors"
@@ -4120,7 +4294,7 @@ export default function AdminPage({ user }: { user: User | null }) {
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
               className="bg-white rounded-[32px] w-full max-w-2xl overflow-hidden shadow-2xl relative z-10 flex flex-col max-h-[80vh]"
             >
-              <div className="px-8 py-6 border-b border-gray-100 flex items-center justify-between">
+              <div className="px-8 py-6 border-b border-gray-100 flex items-center justify-between shrink-0">
                 <div>
                   <h2 className="text-xl font-bold text-gray-900">
                     {viewHistoryUserName}님의 이용 내역
@@ -4135,55 +4309,146 @@ export default function AdminPage({ user }: { user: User | null }) {
                 </button>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-8">
-                {loadingHistory ? (
-                  <div className="flex flex-col items-center justify-center py-20 gap-4">
-                    <Activity className="w-8 h-8 text-indigo-500 animate-spin" />
-                    <p className="text-gray-500 font-medium">내역을 불러오는 중...</p>
+              <div 
+                className="flex-1 overflow-y-auto p-8 flex flex-col"
+                onScroll={(e) => {
+                  const target = e.target as HTMLDivElement;
+                  if (target.scrollHeight - target.scrollTop <= target.clientHeight + 100) {
+                    loadMoreUserHistory();
+                  }
+                }}
+              >
+                <div className="bg-gradient-to-br from-indigo-900 to-indigo-800 rounded-2xl p-6 sm:p-8 text-white shadow-xl relative overflow-hidden mb-6 shrink-0">
+                  <div className="flex flex-col md:flex-row md:items-end justify-between relative z-10">
+                    <div>
+                      <div className="flex items-center gap-2 mb-2">
+                        <Coins className="w-5 h-5 text-indigo-300" />
+                        <h2 className="text-lg font-bold text-indigo-100">총 보유 크레딧</h2>
+                      </div>
+                      <p className="text-5xl font-black tracking-tight">{userHistoryStats.total.toLocaleString()} <span className="text-xl font-medium text-indigo-200 tracking-normal">C</span></p>
+                    </div>
+                    
+                    <div className="flex gap-4 sm:gap-8 w-full md:w-auto mt-4 md:mt-0 pt-4 md:pt-0 border-t border-indigo-700/50 md:border-none">
+                      <div className="flex-1 md:flex-none">
+                        <h3 className="text-indigo-200 text-sm font-medium mb-1">친구 누적 크레딧</h3>
+                        {userHistoryStats.loading ? (
+                          <div className="h-6 w-20 bg-white/10 animate-pulse rounded-lg mt-1"></div>
+                        ) : (
+                          <div className="text-2xl font-bold">{userHistoryStats.friend.toLocaleString()} <span className="text-sm font-medium text-indigo-200">C</span></div>
+                        )}
+                      </div>
+                      <div className="w-px bg-indigo-700/50 hidden md:block"></div>
+                      <div className="flex-1 md:flex-none">
+                        <h3 className="text-indigo-200 text-sm font-medium mb-1">이달 사용 크레딧</h3>
+                        {userHistoryStats.loading ? (
+                          <div className="h-6 w-20 bg-white/10 animate-pulse rounded-lg mt-1"></div>
+                        ) : (
+                          <div className="text-2xl font-bold">{userHistoryStats.monthUsed.toLocaleString()} <span className="text-sm font-medium text-indigo-200">C</span></div>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                ) : userHistory.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-20 gap-4">
-                    <History className="w-12 h-12 text-gray-200" />
-                    <p className="text-gray-500 font-medium">사용 내역이 없습니다.</p>
+                </div>
+                {/* Filter Tabs */}
+                <div className="flex items-center justify-between mb-4 shrink-0 px-1">
+                  <span className="text-sm font-bold text-gray-700">이용 내역 필터</span>
+                  <div className="flex items-center gap-1.5 bg-gray-100 p-1 rounded-xl">
+                    <button
+                      onClick={() => setCreditHistoryFilter('all')}
+                      className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors ${creditHistoryFilter === 'all' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                    >
+                      전체내역
+                    </button>
+                    <button
+                      onClick={() => setCreditHistoryFilter('earned')}
+                      className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors ${creditHistoryFilter === 'earned' ? 'bg-white text-green-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                    >
+                      적립내역
+                    </button>
+                    <button
+                      onClick={() => setCreditHistoryFilter('deducted')}
+                      className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors ${creditHistoryFilter === 'deducted' ? 'bg-white text-red-500 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                    >
+                      차감내역
+                    </button>
                   </div>
-                ) : (
-                  <div className="space-y-4">
-                    {userHistory.map((t) => (
-                      <div
-                        key={t.id}
-                        className="flex justify-between items-center p-4 rounded-2xl bg-gray-50/50 border border-gray-100 hover:border-indigo-100 transition-colors"
-                      >
-                        <div className="flex items-center gap-4">
-                          <div
-                            className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${t.type === "earned" ? "bg-green-50 text-green-500" : "bg-red-50 text-red-500"}`}
-                          >
-                            {t.type === "earned" ? (
-                              <Plus className="w-5 h-5" />
-                            ) : (
-                              <ArrowRight className="w-5 h-5" />
-                            )}
+                </div>
+
+                {(() => {
+                  const filteredHistory = userHistory.filter(t => creditHistoryFilter === 'all' || t.type === creditHistoryFilter);
+                  
+                  if (loadingHistory) {
+                    return (
+                      <div className="flex flex-col items-center justify-center py-20 gap-4">
+                        <Activity className="w-8 h-8 text-indigo-500 animate-spin" />
+                        <p className="text-gray-500 font-medium">내역을 불러오는 중...</p>
+                      </div>
+                    );
+                  }
+                  
+                  if (userHistory.length === 0) {
+                    return (
+                      <div className="flex flex-col items-center justify-center py-20 gap-4">
+                        <History className="w-12 h-12 text-gray-200" />
+                        <p className="text-gray-500 font-medium">사용 내역이 없습니다.</p>
+                      </div>
+                    );
+                  }
+
+                  if (filteredHistory.length === 0) {
+                    return (
+                      <div className="flex flex-col items-center justify-center py-20 gap-4">
+                        <History className="w-12 h-12 text-gray-200" />
+                        <p className="text-gray-500 font-medium">조건에 맞는 내역이 없습니다.</p>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="space-y-4">
+                      {filteredHistory.map((t) => (
+                        <div
+                          key={t.id}
+                          className="flex justify-between items-center p-4 rounded-2xl bg-gray-50/50 border border-gray-100 hover:border-indigo-100 transition-colors"
+                        >
+                          <div className="flex items-center gap-4">
+                            <div
+                              className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${t.type === "earned" ? "bg-green-50 text-green-500" : "bg-red-50 text-red-500"}`}
+                            >
+                              {t.type === "earned" ? (
+                                <Plus className="w-5 h-5" />
+                              ) : (
+                                <ArrowRight className="w-5 h-5" />
+                              )}
+                            </div>
+                            <div>
+                              <p className="font-bold text-gray-900">{t.description}</p>
+                              <p className="text-xs text-gray-400 font-mono">
+                                {new Date(t.created_at).toLocaleString()}
+                              </p>
+                            </div>
                           </div>
-                          <div>
-                            <p className="font-bold text-gray-900">{t.description}</p>
-                            <p className="text-xs text-gray-400 font-mono">
-                              {new Date(t.created_at).toLocaleString()}
+                          <div className="text-right">
+                            <p
+                              className={`font-black text-lg ${t.type === "earned" ? "text-green-500" : "text-red-500"}`}
+                            >
+                              {t.type === "earned" ? "+" : "-"}{t.amount.toLocaleString()}
+                            </p>
+                            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                              {t.type === "earned" ? "Credit In" : "Credit Out"}
                             </p>
                           </div>
                         </div>
-                        <div className="text-right">
-                          <p
-                            className={`font-black text-lg ${t.type === "earned" ? "text-green-500" : "text-red-500"}`}
-                          >
-                            {t.type === "earned" ? "+" : "-"}{t.amount.toLocaleString()}
-                          </p>
-                          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
-                            {t.type === "earned" ? "Credit In" : "Credit Out"}
-                          </p>
+                      ))}
+                      {userHistoryLoadingMore && (
+                        <div className="py-4 flex justify-center items-center gap-2 text-gray-400 text-sm">
+                          <Activity className="w-4 h-4 animate-spin text-indigo-500" />
+                          <span>더 불러오는 중...</span>
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
 
               <div className="p-6 bg-gray-50 border-t border-gray-100 flex justify-end">
@@ -4406,11 +4671,31 @@ export default function AdminPage({ user }: { user: User | null }) {
                             </span>
                          </div>
 
-                         <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest mb-4">약관 동의</h3>
+                         <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest mb-4">이용 내역</h3>
                          <div className="space-y-3">
-                             <div className="text-xs text-gray-500 text-center py-4 bg-gray-50 rounded-xl border border-gray-100">
-                               관리자 API에서 세부 약관 동의 내역을 제공하지 않습니다.
-                             </div>
+                             {loadingDesignerCreditHistory ? (
+                               <div className="flex justify-center items-center py-6 bg-gray-50 rounded-xl border border-gray-100">
+                                 <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+                               </div>
+                             ) : designerCreditHistory.length === 0 ? (
+                               <div className="text-xs text-gray-500 text-center py-4 bg-gray-50 rounded-xl border border-gray-100">
+                                 이용 내역이 없습니다.
+                               </div>
+                             ) : (
+                               <div className="bg-white rounded-xl border border-gray-100 max-h-[200px] overflow-y-auto">
+                                 {designerCreditHistory.map((t) => (
+                                   <div key={t.id} className="flex justify-between items-center p-3 border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors">
+                                     <div>
+                                       <p className="text-sm font-medium text-gray-900">{t.description}</p>
+                                       <p className="text-xs text-gray-500">{new Date(t.created_at).toLocaleString('ko-KR')}</p>
+                                     </div>
+                                     <div className={`text-sm font-bold ${t.type === 'earned' ? 'text-indigo-600' : 'text-red-500'}`}>
+                                       {t.type === 'earned' ? '+' : '-'}{t.amount} CR
+                                     </div>
+                                   </div>
+                                 ))}
+                               </div>
+                             )}
                          </div>
                     </div>
                  </div>
