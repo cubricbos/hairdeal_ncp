@@ -5,6 +5,9 @@ export interface SiteSettings {
     logoImage: string;
     logoWidth?: string;
     logoHeight?: string;
+    primaryBtnText?: string;
+    primaryBtnAction?: 'section' | 'link' | 'modal';
+    primaryBtnTarget?: string;
     links: { id: string; label: string; href: string; hidden?: boolean }[];
     mypageMenu?: {
       aiModel?: string;
@@ -286,6 +289,9 @@ export const defaultSiteSettings: SiteSettings = {
     logoImage: '',
     logoWidth: 'auto',
     logoHeight: '32px',
+    primaryBtnText: '무료 시작하기',
+    primaryBtnAction: 'modal',
+    primaryBtnTarget: 'auth',
     links: [
       { id: '1', label: '기능소개', href: '/#features' },
       { id: '2', label: 'AI스튜디오', href: '/#marketing' },

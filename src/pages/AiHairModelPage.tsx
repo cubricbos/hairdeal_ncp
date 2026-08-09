@@ -423,8 +423,9 @@ export default function AiHairModelPage({ user }: { user: User | null }) {
               } catch (e2) {
                 try {
                   const ncpRes = await accountClient.get('/designer/detail');
-                  if (ncpRes.data && ncpRes.data.credit !== undefined) {
-                    currentNcpCredits = ncpRes.data.credit;
+                  const ncpData = ncpRes?.data?.data || ncpRes?.data?.result || ncpRes?.data?.designer || ncpRes?.data;
+                  if (ncpData && ncpData.credit !== undefined) {
+                    currentNcpCredits = ncpData.credit;
                   }
                 } catch (e3) {
                   console.warn('Failed to retrieve NCP credits in AI Hair Model Page from all paths', e3);
@@ -562,8 +563,9 @@ export default function AiHairModelPage({ user }: { user: User | null }) {
                } catch (e2) {
                  try {
                    const ncpRes = await accountClient.get('/designer/detail');
-                   if (ncpRes.data && ncpRes.data.credit !== undefined) {
-                     currentNcpCredits = ncpRes.data.credit;
+                  const ncpData = ncpRes?.data?.data || ncpRes?.data?.result || ncpRes?.data?.designer || ncpRes?.data;
+                  if (ncpData && ncpData.credit !== undefined) {
+                     currentNcpCredits = ncpData.credit;
                    }
                  } catch (e3) {
                    console.warn('Failed to retrieve NCP credits in confirmGenerate', e3);

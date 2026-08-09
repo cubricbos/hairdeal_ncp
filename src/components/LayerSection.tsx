@@ -62,8 +62,20 @@ export default function LayerSection({ layer }: { layer: NonNullable<SiteSetting
                    {layer.primaryBtn && (
                       <button 
                         onClick={() => {
-                          if (layer.primaryBtnLink === '#') window.dispatchEvent(new CustomEvent('open-auth'));
-                          else window.location.href = layer.primaryBtnLink || '#';
+                          if (layer.primaryBtnLink === '#') {
+                            const action = settings.nav?.primaryBtnAction || 'modal';
+                            const target = settings.nav?.primaryBtnTarget || 'auth';
+                            if (action === 'modal') {
+                              if (target === 'auth') window.dispatchEvent(new CustomEvent('open-auth'));
+                              else if (target === 'inquiry') window.dispatchEvent(new CustomEvent('open-inquiry'));
+                            } else if (action === 'section') {
+                              const el = document.getElementById(target.replace('#', ''));
+                              if (el) el.scrollIntoView({ behavior: 'smooth' });
+                            } else if (action === 'link') {
+                              if (target.startsWith('http')) window.open(target, '_blank');
+                              else window.location.href = target;
+                            }
+                          } else window.location.href = layer.primaryBtnLink || '#';
                         }}
                         className={`${layer.primaryBtnColor || 'bg-brand-primary text-white'} px-10 py-5 rounded-full font-bold text-lg sm:text-xl hover:shadow-2xl hover:scale-105 active:scale-95 transition-all w-full sm:w-auto shadow-md`}
                       >

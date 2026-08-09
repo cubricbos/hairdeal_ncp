@@ -366,6 +366,10 @@ export default function StoreManagementPage({ user }: { user: User | null }) {
         }))
       };
 
+      if (name) {
+        localStorage.setItem('ncp_shop_name', name);
+      }
+
       let ncpUpdated = false;
 
       // 1a. Core Server /designer/management Sync - Actual settings repository

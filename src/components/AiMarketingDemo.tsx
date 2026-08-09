@@ -207,7 +207,18 @@ export default function AiMarketingDemo({ user }: { user?: User | null; key?: Re
   
   const triggerAuth = () => {
     if (user) return;
-    window.dispatchEvent(new CustomEvent('open-auth'));
+    const action = settings.nav?.primaryBtnAction || 'modal';
+    const target = settings.nav?.primaryBtnTarget || 'auth';
+    if (action === 'modal') {
+      if (target === 'auth') window.dispatchEvent(new CustomEvent('open-auth'));
+      else if (target === 'inquiry') window.dispatchEvent(new CustomEvent('open-inquiry'));
+    } else if (action === 'section') {
+      const el = document.getElementById(target.replace('#', ''));
+      if (el) el.scrollIntoView({ behavior: 'smooth' });
+    } else if (action === 'link') {
+      if (target.startsWith('http')) window.open(target, '_blank');
+      else window.location.href = target;
+    }
   };
 
   return (

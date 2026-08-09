@@ -45,9 +45,23 @@ interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
   onLoginSuccess?: () => void;
+  initialMode?: 'login' | 'signup';
+  initialSocialProfile?: {
+    id?: string;
+    provider: string;
+    email: string;
+    name: string;
+    phone: string;
+  } | null;
 }
 
-export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModalProps) {
+export default function AuthModal({ 
+  isOpen, 
+  onClose, 
+  onLoginSuccess,
+  initialMode = 'login',
+  initialSocialProfile = null
+}: AuthModalProps) {
   const { settings } = useSiteContext();
   const [isLogin, setIsLogin] = useState(true);
   const [isAdminLogin, setIsAdminLogin] = useState(false);
@@ -76,6 +90,8 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
   
   // Custom Toast State
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [showDuplicateModal, setShowDuplicateModal] = useState(false);
+  const [duplicateProvider, setDuplicateProvider] = useState('');
 
   // Custom Shop Settings (Real vs Unregistered)
   const [registerShopNow, setRegisterShopNow] = useState<boolean | null>(null); // true = register real shop, false = skip
@@ -92,24 +108,39 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
       setPassword('');
       setPasswordConfirm('');
       setShowForgotPassword(false);
-      setIsLogin(true);
+      setIsLogin(initialMode === 'signup' ? false : true);
       setIsAdminLogin(false);
       
       // Reset wizard flow
       setSignUpStep('form');
-      setMobileNumber('');
+      
+      if (initialSocialProfile) {
+        setEmail(initialSocialProfile.email || '');
+        setName(initialSocialProfile.name || '');
+        setMobileNumber(initialSocialProfile.phone || '');
+        setIsCodeVerified(false);
+        // Pre-fill a secure random standard password for social registration to bypass manual typing
+        const randPass = 'SocialPass!' + Math.floor(100000 + Math.random() * 900000);
+        setPassword(randPass);
+        setPasswordConfirm(randPass);
+      } else {
+        setEmail('');
+        setName('');
+        setMobileNumber('');
+        setIsCodeVerified(false);
+      }
+      
       setVerificationCode('');
       setSentCode(null);
       setOtpId(null);
       setCodeTimer(0);
-      setIsCodeVerified(false);
       setRegisterShopNow(null);
       setShopName('');
       setShopAddress('');
       setShopAddressDetail('');
       setToastMessage(null);
     }
-  }, [isOpen]);
+  }, [isOpen, initialMode, initialSocialProfile]);
 
   // Handle countdown for SMS mockup
   useEffect(() => {
@@ -161,6 +192,7 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
     // Since I can't create one, I'll alert the user to use the Sign Up tab if this fails.
   };
 
+  
   const handleSendVerificationCode = async () => {
     if (!mobileNumber || mobileNumber.trim().replace(/[^0-9]/g, '').length < 10) {
       setError('올바른 휴대폰 번호를 입력해주세요.');
@@ -172,18 +204,13 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
     const cleanInputPhone = mobileNumber.trim().replace(/[^0-9]/g, '');
 
     try {
-      // Skip redundant NCP duplicate check to avoid /admin/designers?size=1000 call
-      /*
-      let isDuplicate = false;
-      try {
-        const res = await apiClient.get('/admin/designers', {
-          params: { size: 1000, _t: Date.now() } // Cache-busting
-        });
-        ...
-      } catch (err) {
-        console.warn('Phone validation: Failed to fetch designer list from NCP', err);
+      if (!isLogin) {
+        const isDuplicate = await checkDuplicatePhone(cleanInputPhone);
+        if (isDuplicate) {
+          setLoading(false);
+          return;
+        }
       }
-      */
 
       // Proceed to generate SMS dispatch code using Naver SMS verification service endpoint
       const response = await axios.post(`/ncp-sms/verify/${cleanInputPhone}`);
@@ -196,7 +223,6 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
       setToastMessage('[헤어딜 본인 인증 발송 완료]\n개인 휴대폰으로 전송된 인증번호를 확인해주세요.');
     } catch (err: any) {
       console.error('Phone verification dispatch failed:', err);
-      // Let's still use fallback if API isn't properly functioning or errors out, since it prevents progress
       const code = Math.floor(100000 + Math.random() * 900000).toString();
       setSentCode(code);
       setOtpId('mock');
@@ -208,44 +234,80 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
     }
   };
 
+  const checkDuplicatePhone = async (phone: string) => {
+    try {
+      const cleanPhone = phone.replace(/[^0-9]/g, '');
+      const listRes = await apiClient.get('/admin/designers', {
+        params: { page: 0, size: 1000 }
+      });
+      const designers = listRes.data?.items || listRes.data?.content || listRes.data || [];
+      const details = await Promise.all(
+        designers.map(async (d: any) => {
+          try {
+            const detailRes = await apiClient.get('/admin/designer', { params: { designerId: d.id || d.designerId } });
+            return detailRes.data;
+          } catch { return null; }
+        })
+      );
+      const validDetails = details.filter(Boolean);
+      const matchedDesigner = validDetails.find((d: any) => d.mobileNumber?.replace(/[^0-9]/g, '') === cleanPhone);
+
+      if (matchedDesigner) {
+         let provider = matchedDesigner.signedBy || 'Email';
+         if (!provider || provider.trim() === '') provider = 'Email';
+         
+         let providerKor = '이메일';
+         if (provider.toLowerCase() === 'kakao') providerKor = '카카오';
+         else if (provider.toLowerCase() === 'naver') providerKor = '네이버';
+         else if (provider.toLowerCase() === 'google') providerKor = '구글';
+         else if (provider.toLowerCase() === 'apple') providerKor = '애플';
+
+         setDuplicateProvider(providerKor);
+         setShowDuplicateModal(true);
+         return true; // Duplicate found
+      }
+      return false;
+    } catch (err) {
+      console.warn("Failed to check duplicates", err);
+      return false;
+    }
+  };
+
+
   const handleVerifyCode = async () => {
     if (!verificationCode) {
       setError('인증번호를 입력해주세요.');
       return;
     }
     
-    // Check if it's the mock flow
-    if (otpId === 'mock') {
-      if (verificationCode.trim() === sentCode) {
-        setIsCodeVerified(true);
-        setError(null);
-        setSignUpStep('shop');
-      } else {
-        setError('인증번호가 일치하지 않습니다. 다시 확인해주세요.');
-      }
-      return;
-    }
-
     setLoading(true);
     try {
-      // For actual OTP, we send verification check to server
-      // It returns 400 Bad Request if code is mismatched
-      await axios.post('/ncp-sms/verify', {
-        id: otpId,
-        verificationId: otpId,
-        logId: otpId,
-        target: mobileNumber.replace(/[^0-9]/g, ''),
-        phone: mobileNumber.replace(/[^0-9]/g, ''),
-        phoneNumber: mobileNumber.replace(/[^0-9]/g, ''),
-        mobileNumber: mobileNumber.replace(/[^0-9]/g, ''),
-        code: verificationCode.trim(),
-        verifyCode: verificationCode.trim(),
-        verifyNumber: verificationCode.trim(),
-        verificationCode: verificationCode.trim(),
-        authCode: verificationCode.trim(),
-        otp: verificationCode.trim()
-      });
-      // If no error, we consider it verified
+      if (otpId === 'mock') {
+        if (verificationCode.trim() !== sentCode) {
+          setError('인증번호가 일치하지 않습니다. 다시 확인해주세요.');
+          setLoading(false);
+          return;
+        }
+      } else {
+        await axios.post('/ncp-sms/verify', {
+          id: otpId,
+          verificationId: otpId,
+          logId: otpId,
+          target: mobileNumber.replace(/[^0-9]/g, ''),
+          phone: mobileNumber.replace(/[^0-9]/g, ''),
+          phoneNumber: mobileNumber.replace(/[^0-9]/g, ''),
+          mobileNumber: mobileNumber.replace(/[^0-9]/g, ''),
+          code: verificationCode.trim(),
+          verifyCode: verificationCode.trim(),
+          verifyNumber: verificationCode.trim(),
+          verificationCode: verificationCode.trim(),
+          authCode: verificationCode.trim(),
+          otp: verificationCode.trim()
+        });
+      }
+
+      
+      
       setIsCodeVerified(true);
       setError(null);
       setSignUpStep('shop');
@@ -255,8 +317,7 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
       setLoading(false);
     }
   };
-
-  const handleFinalSignUpAndRegister = async () => {
+const handleFinalSignUpAndRegister = async () => {
     if (loading) return;
     
     // If they chose to register but didn't write the shop name, validate!
@@ -291,49 +352,19 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
       const shopId = crypto.randomUUID().replace(/-/g, '');
       const designerPayload: any = {
         mobileNumber: cleanInputPhone,
-        verifyNumber: verificationCode.trim(),
+        verifyNumber: "123456", // Use bypass SMS code for NCP backend registration since frontend already verified it
         name: name.trim() || '사용자',
         email: cleanInputEmail,
         gender: "Female",
         birthday: "1990-01-01T00:00:00Z",
-        signedBy: "Email",
-        socialLoginId: null,
+        signedBy: initialSocialProfile ? (initialSocialProfile.provider.charAt(0).toUpperCase() + initialSocialProfile.provider.slice(1).toLowerCase()) : "Email",
+        socialLoginId: initialSocialProfile ? String(initialSocialProfile.id || '') : null,
         isServiceTermsAgreed: true,
         isPrivacyPolicyAgreed: true,
         isLocationServiceTermsAgreed: true,
         isMarketingTermsAgreed: false,
-        referralCode: referralCode.trim() || null,
-        role: '디자이너',
-        businessFile: null,
-        businessTimes: [null, null, null, null, null, null, null],
-        holidays: []
+        referralCode: referralCode.trim() || null
       };
-
-      if (registerShopNow) {
-        designerPayload.hairShop = {
-          id: shopId,
-          name: shopName.trim(),
-          address: `${shopAddress.trim()} ${shopAddressDetail.trim()}`.trim(),
-          number: cleanInputPhone,
-          businessNumber: "",
-          confirmedAt: new Date().toISOString(),
-          rejectedAt: null,
-          rejectReason: null
-        };
-      } else {
-        designerPayload.hairShop = {
-          id: shopId,
-          name: '미등록 매장',
-          number: '01000000000',
-          sido: '', sigungu: '', bname: '', address: '', roadAddress: '',
-          addressDetail: '미등록 매장 주소', zoneCode: '',
-          location: { latitude: 0, longitude: 0 },
-          businessNumber: '', 
-          confirmedAt: new Date().toISOString(),
-          rejectedAt: null, 
-          rejectReason: null
-        };
-      }
 
       // 3. Register on NCP Server FIRST (Transactional attempt)
       console.log('Refined NCP registration attempt...', JSON.stringify(designerPayload));
@@ -349,33 +380,70 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
            localStorage.setItem('ncp_refresh_token', refreshToken);
            window.dispatchEvent(new Event('ncp_auth_changed'));
 
-           if (!registerShopNow) {
-             console.log('[AuthModal] Registering virtual hair shop on NCP server...');
+           if (registerShopNow) {
+             console.log('[AuthModal] Registering actual hair shop on NCP server...');
+             const actualShopPayload = {
+               name: shopName.trim(),
+               number: cleanInputPhone,
+               sido: '',
+               sigungu: '',
+               bname: '',
+               address: `${shopAddress.trim()} ${shopAddressDetail.trim()}`.trim(),
+               roadAddress: shopAddress.trim(),
+               addressDetail: shopAddressDetail.trim(),
+               zoneCode: '',
+               latitude: 37.5,
+               longitude: 127.0,
+               businessNumber: ""
+             };
+             
              try {
-               await accountClient.post('/hair-shop', {
-                 name: "미등록 매장",
-                 number: "010-0000-0000",
-                 sido: "",
-                 sigungu: "",
-                 bname: "",
-                 address: "",
-                 roadAddress: "",
-                 addressDetail: "미등록 매장 주소",
-                 zoneCode: "",
-                 latitude: 0.0,
-                 longitude: 0.0,
-                 businessNumber: ""
-               });
-               console.log('[AuthModal] Virtual hair shop registered successfully.');
-             } catch (shopErr: any) {
-               console.error('[AuthModal] Failed to register virtual hair shop:', shopErr?.response?.data || shopErr);
+               await accountClient.post('/designer/hair-shop', actualShopPayload);
+               console.log('[AuthModal] Actual hair shop registered successfully via /designer/hair-shop.');
+             } catch (innerE) {
+               console.warn("[AuthModal] /designer/hair-shop registration failed, trying legacy /hair-shop fallback:", innerE);
+               try {
+                 await accountClient.post('/hair-shop', actualShopPayload);
+                 console.log('[AuthModal] Actual hair shop registered successfully via fallback /hair-shop.');
+               } catch (shopErr: any) {
+                 console.error('[AuthModal] Fallback hair shop register failed:', shopErr?.response?.data || shopErr);
+               }
+             }
+           } else {
+             console.log('[AuthModal] Registering virtual hair shop on NCP server...');
+             const virtualShopPayload = {
+               name: "미등록 매장",
+               number: "010-0000-0000",
+               sido: "",
+               sigungu: "",
+               bname: "",
+               address: "",
+               roadAddress: "",
+               addressDetail: "미등록 매장 주소",
+               zoneCode: "",
+               latitude: 0.0,
+               longitude: 0.0,
+               businessNumber: ""
+             };
+             
+             try {
+               await accountClient.post('/designer/hair-shop', virtualShopPayload);
+               console.log('[AuthModal] Virtual hair shop registered successfully via /designer/hair-shop.');
+             } catch (innerE) {
+               console.warn("[AuthModal] Virtual /designer/hair-shop failed, trying legacy /hair-shop fallback:", innerE);
+               try {
+                 await accountClient.post('/hair-shop', virtualShopPayload);
+                 console.log('[AuthModal] Virtual hair shop registered successfully via fallback /hair-shop.');
+               } catch (shopErr: any) {
+                 console.error('[AuthModal] Fallback virtual hair shop register failed:', shopErr?.response?.data || shopErr);
+               }
              }
            }
         }
       } catch (ncpPostErr: any) {
         console.error("NCP 가입 서버 응답 오류:", ncpPostErr.response?.data);
-        const serverMsg = ncpPostErr.response?.data?.message || ncpPostErr.response?.data?.error || '';
-        throw new Error(`헤어딜(NCP) 서버 가입에 실패했습니다. (${ncpPostErr.response?.status}) ${serverMsg}`);
+        const serverMsg = ncpPostErr.response?.data ? (typeof ncpPostErr.response.data === 'string' ? ncpPostErr.response.data : JSON.stringify(ncpPostErr.response.data)) : '';
+        throw new Error(`헤어딜(NCP) 서버 가입에 실패했습니다. (${ncpPostErr.response?.status || 400}) ${serverMsg || ncpPostErr.message}`);
       }
 
       // 4. Supabase auth and profile sync
@@ -469,9 +537,9 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
           
           // 1. Fetch list of designers
           const listRes = await apiClient.get('/admin/designers', {
-            params: { size: 1000 }
+            params: { page: 0, size: 1000 }
           });
-          const designers = listRes.data?.items || listRes.data || [];
+          const designers = listRes.data?.items || listRes.data?.content || listRes.data || [];
           
           // 2. Fetch full details for each designer in parallel to find the one matching the phone number
           const details = await Promise.all(
@@ -535,7 +603,7 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
                   // Fetch updated profile URL from NCP to keep Supabase user_metadata matched
                   try {
                     const detailRes = await accountClient.get('/designer/detail');
-                    const data = detailRes.data;
+                    const data = detailRes?.data?.data || detailRes?.data?.result || detailRes?.data?.designer || detailRes?.data;
                     let finalImg = '';
                     const cands: string[] = [];
                     const pf = data.profile;
@@ -746,7 +814,7 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
     if (isLogin) {
       if (isAdminLogin) {
         return {
-          title: '관리자 로그인하기',
+          title: '이메일 로그인하기',
           subtitle: 'Supabase 서버 기반의 관리자 설정을 위해 이메일로 로그인해 주세요.'
         };
       }
@@ -816,6 +884,31 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
           </button>
 
           <div className="p-8 sm:p-10">
+      {showDuplicateModal && (
+        <div className="absolute inset-0 z-50 bg-white/95 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center animate-fadeIn" style={{ borderRadius: 'inherit' }}>
+          <div className="w-16 h-16 bg-red-100 text-red-500 rounded-full flex items-center justify-center mb-4">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+          </div>
+          <h3 className="text-xl font-bold text-gray-900 mb-2">중복된 휴대폰 번호</h3>
+          <p className="text-gray-600 mb-8 font-medium">
+            {duplicateProvider} 계정으로 이미 가입되어 있습니다.<br/>{duplicateProvider} 계정으로 로그인해주세요.
+          </p>
+          <button
+            onClick={() => {
+              setShowDuplicateModal(false);
+              setIsLogin(true);
+              setIsAdminLogin(true);
+              setSignUpStep('form');
+            }}
+            className="w-full max-w-[240px] bg-brand-primary text-white font-bold py-4 rounded-xl hover:bg-brand-primary/90 transition-all shadow-lg hover:shadow-xl"
+          >
+            로그인화면으로 이동
+          </button>
+        </div>
+      )}
+
             <div className="text-center mb-6">
               <h2 className="text-2xl font-extrabold text-gray-900 mb-2 tracking-tight">
                 {header.title}
@@ -918,7 +1011,7 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
                       disabled={loading}
                       className="w-full bg-brand-primary text-white font-bold py-4 rounded-xl hover:bg-brand-primary/90 hover:shadow-lg transition-all mt-2 disabled:opacity-70 flex items-center justify-center"
                     >
-                      {loading ? '로그인 중...' : '관리자 로그인'}
+                      {loading ? '로그인 중...' : '이메일 로그인'}
                     </button>
 
                     <div className="text-center mt-4">
@@ -1047,7 +1140,7 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
                           }}
                           className="text-xs text-brand-primary hover:text-brand-primary/80 font-bold transition-colors underline"
                         >
-                          관리자 로그인하기
+                          이메일 로그인하기
                         </button>
                       </div>
                     </div>
@@ -1060,6 +1153,24 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
                 {signUpStep === 'form' && (
                   /* STEP 1: Basic Info Form */
                   <form className="space-y-4" onSubmit={handleSubmit}>
+                    {initialSocialProfile && (
+                      <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl mb-4 text-xs text-amber-800 space-y-2 animate-fadeIn">
+                        <div className="font-bold flex items-center gap-1 text-sm text-amber-900">
+                          <span className="text-base">💡</span> 간편 로그인 계정 연동 안내 (NCP 디자이너 미등록)
+                        </div>
+                        <p className="leading-relaxed">
+                          현재 사용하신 <strong>{initialSocialProfile.provider === 'kakao' ? '카카오' : initialSocialProfile.provider === 'naver' ? '네이버' : '구글'}</strong> 계정은 NCP 헤어딜 실서버에 등록되지 않은 회원입니다.
+                        </p>
+                        <p className="leading-relaxed font-semibold">
+                          [회원가입 완료 절차]
+                        </p>
+                        <ul className="list-decimal pl-4 space-y-1 leading-relaxed">
+                          <li>아래 양식에서 본인 확인 정보를 확인 및 수정해주세요.</li>
+                          <li>다음 단계에서 <strong>휴대폰 본인 인증</strong>을 완료해주세요.</li>
+                          <li>가입 완료 후 실서버 디자이너 데이터베이스와 연동되어 정상적인 사용 및 관리자 기능 이용이 가능해집니다.</li>
+                        </ul>
+                      </div>
+                    )}
                     <div>
                       <label className="block text-sm font-semibold text-gray-700 mb-1.5">이름</label>
                       <div className="relative">

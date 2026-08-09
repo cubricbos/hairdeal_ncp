@@ -470,6 +470,10 @@ export default function ShopManagementPage({ user }: { user: User | null }) {
             }))
           };
 
+          if (formData.name) {
+            localStorage.setItem('ncp_shop_name', formData.name);
+          }
+
           let response;
           // Also sync to Account Server to maintain identical synchronized state everywhere
           try {

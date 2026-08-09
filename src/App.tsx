@@ -93,6 +93,8 @@ function LandingPage({ setIsAuthOpen, user }: { setIsAuthOpen: (val: boolean) =>
 
 function AppContent() {
   const [isAuthOpen, setIsAuthOpen] = useState(false);
+  const [authInitialMode, setAuthInitialMode] = useState<'login' | 'signup'>('login');
+  const [socialRegisterProfile, setSocialRegisterProfile] = useState<any | null>(null);
   const [isInquiryOpen, setIsInquiryOpen] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [isAuthInitialized, setIsAuthInitialized] = useState(false);
@@ -105,6 +107,24 @@ function AppContent() {
   useEffect(() => {
     isMounted.current = true;
     return () => { isMounted.current = false; };
+  }, []);
+
+  // Check for direct redirect social signup fallback
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('signup_social') === 'true') {
+      const provider = params.get('provider') || '';
+      const email = params.get('email') || '';
+      const name = params.get('name') || '';
+      const phone = params.get('phone') || '';
+      
+      setSocialRegisterProfile({ provider, email, name, phone });
+      setAuthInitialMode('signup');
+      setIsAuthOpen(true);
+      
+      // Clear URL parameters to keep it clean
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
   }, []);
 
   useEffect(() => {
@@ -454,7 +474,7 @@ function AppContent() {
               ? rawId
               : `${rawId.substring(0, 8)}-${rawId.substring(8, 12)}-${rawId.substring(12, 16)}-${rawId.substring(16, 20)}-${rawId.substring(20)}`;
             
-            const isSystemAdmin = decoded.email === 'cubric.ceo@gmail.com' || localStorage.getItem('ncp_admin') === 'true';
+            const isSystemAdmin = (decoded.email && decoded.email.toLowerCase().trim() === 'cubric.ceo@gmail.com') || localStorage.getItem('ncp_admin') === 'true';
             if (isSystemAdmin) {
               console.log("[checkNcpSession] System Admin detected. Bypassing live NCP detail fetch.");
               const initialUser = {
@@ -510,18 +530,19 @@ function AppContent() {
               let ncpAvatarUrl = '';
               try {
                 const detailRes = await accountClient.get('/designer/detail');
-                if (detailRes && detailRes.data && isMounted.current) {
-                  if (detailRes.data.name && detailRes.data.name !== '디자이너' && detailRes.data.name !== '사용자') {
-                    ncpName = detailRes.data.name;
+                const detailData = detailRes?.data?.data || detailRes?.data?.result || detailRes?.data?.designer || detailRes?.data;
+                if (detailData && isMounted.current) {
+                  if (detailData.name && detailData.name !== '디자이너' && detailData.name !== '사용자') {
+                    ncpName = detailData.name;
                   }
-                  if (detailRes.data.email && !detailRes.data.email.endsWith('@ncp.local')) {
-                    ncpEmail = detailRes.data.email;
+                  if (detailData.email && !detailData.email.endsWith('@ncp.local')) {
+                    ncpEmail = detailData.email;
                   }
-                  if (detailRes.data.mobileNumber || detailRes.data.phone) {
-                    ncpPhone = detailRes.data.mobileNumber || detailRes.data.phone;
+                  if (detailData.mobileNumber || detailData.phone) {
+                    ncpPhone = detailData.mobileNumber || detailData.phone;
                   }
                   const cands: string[] = [];
-                  const pf = detailRes.data.profile;
+                  const pf = detailData.profile;
                   if (pf) {
                     if (pf.thumbNailPath) cands.push(pf.thumbNailPath);
                     if (pf.fileName) cands.push(pf.fileName);
@@ -532,9 +553,9 @@ function AppContent() {
                     if (pf.fileId) cands.push(pf.fileId);
                     if (pf.file_id) cands.push(pf.file_id);
                   }
-                  if (detailRes.data.file_id) cands.push(detailRes.data.file_id);
-                  if (detailRes.data.fileId) cands.push(detailRes.data.fileId);
-                  const directOpts = [detailRes.data.profileImageUrl, detailRes.data.profileImage, detailRes.data.imageUrl, detailRes.data.image, detailRes.data.avatarUrl, detailRes.data.avatar_url];
+                  if (detailData.file_id) cands.push(detailData.file_id);
+                  if (detailData.fileId) cands.push(detailData.fileId);
+                  const directOpts = [detailData.profileImageUrl, detailData.profileImage, detailData.imageUrl, detailData.image, detailData.avatarUrl, detailData.avatar_url];
                   directOpts.forEach(u => { if (u) cands.push(u); });
                   if (cands.length > 0) ncpAvatarUrl = Array.from(new Set(cands)).join(',');
                 }
@@ -744,7 +765,14 @@ function AppContent() {
       if (event.origin !== window.location.origin) return;
 
       if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
-        const { session, ncpToken } = event.data;
+        const { session, ncpToken, needRegister, socialProfile } = event.data;
+        if (needRegister) {
+          console.log("Received needRegister flag from social login popup! Redirecting to sign-up flow.", socialProfile);
+          setSocialRegisterProfile(socialProfile);
+          setAuthInitialMode('signup');
+          setIsAuthOpen(true);
+          return;
+        }
         if (ncpToken) {
           localStorage.setItem('ncp_access_token', ncpToken.token);
           if (ncpToken.refreshToken) localStorage.setItem('ncp_refresh_token', ncpToken.refreshToken);
@@ -850,7 +878,17 @@ function AppContent() {
           <Footer />
         </div>
       )}
-      <AuthModal isOpen={isAuthOpen} onClose={() => setIsAuthOpen(false)} onLoginSuccess={handleLoginSuccess} />
+      <AuthModal 
+        isOpen={isAuthOpen} 
+        onClose={() => {
+          setIsAuthOpen(false);
+          setSocialRegisterProfile(null);
+          setAuthInitialMode('login');
+        }} 
+        onLoginSuccess={handleLoginSuccess}
+        initialMode={authInitialMode}
+        initialSocialProfile={socialRegisterProfile}
+      />
       <InquiryModal isOpen={isInquiryOpen} onClose={() => setIsInquiryOpen(false)} />
       {location.pathname !== '/cs-admin' && location.pathname !== '/ai-hair-model_app' && !location.pathname.startsWith('/admin') && !location.pathname.startsWith('/m/shop') && <ChatWidget user={user} />}
       {user && !location.pathname.startsWith('/m/shop') && <ShopNotifier user={user} />}

@@ -190,8 +190,20 @@ export default function Hero() {
             {hero.primaryBtnBase && (
               <button 
                 onClick={() => {
-                  if (hero.primaryBtnLink === '#') window.dispatchEvent(new CustomEvent('open-auth'));
-                  else {
+                  if (hero.primaryBtnLink === '#') {
+                    const action = settings.nav?.primaryBtnAction || 'modal';
+                    const target = settings.nav?.primaryBtnTarget || 'auth';
+                    if (action === 'modal') {
+                      if (target === 'auth') window.dispatchEvent(new CustomEvent('open-auth'));
+                      else if (target === 'inquiry') window.dispatchEvent(new CustomEvent('open-inquiry'));
+                    } else if (action === 'section') {
+                      const el = document.getElementById(target.replace('#', ''));
+                      if (el) el.scrollIntoView({ behavior: 'smooth' });
+                    } else if (action === 'link') {
+                      if (target.startsWith('http')) window.open(target, '_blank');
+                      else window.location.href = target;
+                    }
+                  } else {
                     const link = hero.primaryBtnLink.startsWith('#') ? '/' + hero.primaryBtnLink : hero.primaryBtnLink;
                     window.location.href = link;
                   }

@@ -17,62 +17,82 @@ export const getAvatarCandidates = (originalUrl: string | undefined | null): str
   const parts = trimmedMain.split(',').map(s => s.trim()).filter(Boolean);
   
   parts.forEach(trimmed => {
-    // 1. Raw push - only if it starts with http, /, blob:, or data:
-    if (trimmed.startsWith('http') || trimmed.startsWith('/') || trimmed.startsWith('blob:') || trimmed.startsWith('data:')) {
+    // 1. Instant local preview for blob or data URLs
+    if (trimmed.startsWith('blob:') || trimmed.startsWith('data:')) {
       list.push(trimmed);
+      return;
     }
 
     let fileName = '';
 
-    // Case 1: Already a fully qualified URL with fileName query parameter
+    // Extract fileName from various patterns
     if (trimmed.includes('fileName=')) {
       const match = trimmed.match(/fileName=([^&]+)/);
-      if (match) {
-        fileName = match[1];
-      }
-    } 
-    // Case 2: Standard NCP account storage API path
-    else if (trimmed.startsWith('/api/account/storage?fileName=')) {
-      fileName = trimmed.replace('/api/account/storage?fileName=', '');
-    }
-    else if (trimmed.startsWith('/api/account/storage/')) {
-      fileName = trimmed.replace('/api/account/storage/', '');
-    }
-    else if (trimmed.startsWith('/api/core/storage?fileName=')) {
-      fileName = trimmed.replace('/api/core/storage?fileName=', '');
-    }
-    else if (trimmed.startsWith('/api/core/storage/')) {
-      fileName = trimmed.replace('/api/core/storage/', '');
-    }
-    else if (trimmed.startsWith('https://api.cubric.io/api/storage?fileName=')) {
-      fileName = trimmed.replace('https://api.cubric.io/api/storage?fileName=', '');
-    } 
-    // Case 3: Storage path directly (e.g., /storage/name)
-    else if (trimmed.includes('/storage/')) {
+      if (match) fileName = match[1];
+    } else if (trimmed.includes('/storage/')) {
       const parts = trimmed.split('/storage/');
       fileName = parts[parts.length - 1];
-    } 
-    // Case 4: Pure UUID or file name with extension
-    else if (!trimmed.startsWith('http') && !trimmed.startsWith('/') && !trimmed.startsWith('blob:') && !trimmed.startsWith('data:') && (trimmed.match(/^[a-fA-F0-9-]{36}/) || trimmed.match(/^[0-9a-fA-F]{32}/) || trimmed.includes('.'))) {
+    } else if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+      const urlParts = trimmed.split('?')[0].split('/');
+      const lastSeg = urlParts[urlParts.length - 1];
+      if (lastSeg && lastSeg.length > 2) {
+        fileName = lastSeg;
+      }
+      list.push(trimmed);
+    } else if (trimmed.startsWith('/')) {
+      list.push(trimmed);
+      const urlParts = trimmed.split('?')[0].split('/');
+      const lastSeg = urlParts[urlParts.length - 1];
+      if (lastSeg && lastSeg.length > 2) {
+        fileName = lastSeg;
+      }
+    } else {
+      // Pure file name, ID, or hash
       fileName = trimmed;
     }
 
-    // If we extracted a fileName, prioritize NCP endpoints
     if (fileName) {
-      list.push(`https://api.cubric.io/api/storage?fileName=${fileName}`);
-      if (!fileName.includes('.')) {
-        list.push(`https://api.cubric.io/api/storage?fileName=${fileName}.jpeg`);
-        list.push(`https://api.cubric.io/api/storage?fileName=${fileName}.jpg`);
-        list.push(`https://api.cubric.io/api/storage?fileName=${fileName}.png`);
-      }
-      list.push(`https://api.cubric.io/storage/${fileName}`);
+      // Strip any query parameters or hash from fileName
+      fileName = fileName.split('?')[0].split('#')[0];
+
+      // Primary proxy endpoints
+      list.push(`/api/account/storage?fileName=${fileName}`);
+      list.push(`/api/storage?fileName=${fileName}`);
       list.push(`/api/core/storage?fileName=${fileName}`);
-      list.push(`/api/core/storage/${fileName}`);
+      list.push(`/api/api/storage?fileName=${fileName}`);
+      list.push(`https://api.cubric.io/api/storage?fileName=${fileName}`);
+
+      if (!fileName.includes('.')) {
+        list.push(`/api/account/storage?fileName=${fileName}.jpeg`);
+        list.push(`/api/storage?fileName=${fileName}.jpeg`);
+        list.push(`/api/core/storage?fileName=${fileName}.jpeg`);
+        list.push(`/api/api/storage?fileName=${fileName}.jpeg`);
+        list.push(`https://api.cubric.io/api/storage?fileName=${fileName}.jpeg`);
+
+        list.push(`/api/account/storage?fileName=${fileName}.jpg`);
+        list.push(`/api/storage?fileName=${fileName}.jpg`);
+        list.push(`/api/core/storage?fileName=${fileName}.jpg`);
+        list.push(`/api/api/storage?fileName=${fileName}.jpg`);
+        list.push(`https://api.cubric.io/api/storage?fileName=${fileName}.jpg`);
+
+        list.push(`/api/account/storage?fileName=${fileName}.png`);
+        list.push(`/api/storage?fileName=${fileName}.png`);
+        list.push(`/api/core/storage?fileName=${fileName}.png`);
+        list.push(`/api/api/storage?fileName=${fileName}.png`);
+        list.push(`https://api.cubric.io/api/storage?fileName=${fileName}.png`);
+
+        list.push(`/api/account/storage?fileName=${fileName}.webp`);
+        list.push(`/api/storage?fileName=${fileName}.webp`);
+        list.push(`/api/core/storage?fileName=${fileName}.webp`);
+        list.push(`/api/api/storage?fileName=${fileName}.webp`);
+        list.push(`https://api.cubric.io/api/storage?fileName=${fileName}.webp`);
+      }
+
+      list.push(`https://api.cubric.io/storage/${fileName}`);
       list.push(`/storage/${fileName}`);
     }
   });
 
-  // Always append original url as a fallback if it starts with http, /, blob:, or data:
   if (trimmedMain.startsWith('http') || trimmedMain.startsWith('/') || trimmedMain.startsWith('blob:') || trimmedMain.startsWith('data:')) {
     list.push(trimmedMain);
   }

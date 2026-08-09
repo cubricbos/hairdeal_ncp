@@ -1,5 +1,4 @@
 import axios from 'axios';
-import { generateNcpToken } from './jwt';
 
 export async function syncNcpProfile(user: any) {
   try {
@@ -18,10 +17,10 @@ export async function syncNcpProfile(user: any) {
     try {
       const coreUrl = import.meta.env.VITE_CORE_SERVER_URL || '/api/designer';
       // Use proxy if it's relative, otherwise direct
-      const listUrl = coreUrl.startsWith('/') ? coreUrl.replace('/api/designer', '/api/admin/designers?size=1000') : `${coreUrl}/api/admin/designers?size=1000`;
+      const listUrl = coreUrl.startsWith('/') ? coreUrl.replace('/api/designer', '/api/admin/designers?page=0&size=1000') : `${coreUrl}/api/admin/designers?page=0&size=1000`;
       
       const listRes = await axios.get(listUrl, { timeout: 8000 });
-      const designers = listRes.data?.items || listRes.data || [];
+      const designers = listRes.data?.items || listRes.data?.content || listRes.data || [];
       
       const found = designers.find((d: any) => {
         const ncpPhone = d.mobileNumber ? d.mobileNumber.replace(/[^0-9]/g, '') : '';
@@ -51,7 +50,7 @@ export async function syncNcpProfile(user: any) {
           email: email,
           gender: "Female",
           birthday: "1990-01-01T00:00:00Z",
-          signedBy: "Social",
+          signedBy: (user.app_metadata?.provider || "Email").charAt(0).toUpperCase() + (user.app_metadata?.provider || "Email").slice(1).toLowerCase(),
           socialLoginId: String(user.id),
           isServiceTermsAgreed: true,
           isPrivacyPolicyAgreed: true,
@@ -90,12 +89,12 @@ export async function syncNcpProfile(user: any) {
     // 3. Generate tokens
     const cleanNcpId = matchedDesignerId || user.id.replace(/-/g, '');
     const ncpPayload = { id: cleanNcpId, name, email, mobileNumber: phone };
-    const ncpToken = await generateNcpToken(ncpPayload, '1d');
-    const ncpRefreshToken = await generateNcpToken(ncpPayload, '14d');
-
-    localStorage.setItem('ncp_access_token', ncpToken);
-    localStorage.setItem('ncp_refresh_token', ncpRefreshToken);
-    window.dispatchEvent(new Event('ncp_auth_changed'));
+    const tokenRes = await axios.post('/api/auth/ncp-token', { payload: ncpPayload });
+    if (tokenRes.data?.accessToken) {
+      localStorage.setItem('ncp_access_token', tokenRes.data.accessToken);
+      localStorage.setItem('ncp_refresh_token', tokenRes.data.refreshToken);
+      window.dispatchEvent(new Event('ncp_auth_changed'));
+    }
     
     return true;
   } catch (e) {

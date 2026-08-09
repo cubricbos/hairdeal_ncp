@@ -180,9 +180,10 @@ export default function Navbar({ user }: NavbarProps) {
       // Background sync latest designer detail image candidates
       try {
         accountClient.get(`/designer/detail?_t=${Date.now()}`).then(detailRes => {
-          if (detailRes && detailRes.data && isMounted.current) {
+          const detailData = detailRes?.data?.data || detailRes?.data?.result || detailRes?.data?.designer || detailRes?.data;
+          if (detailData && isMounted.current) {
             const cands: string[] = [];
-            const pf = detailRes.data.profile;
+            const pf = detailData.profile;
             if (pf) {
               if (Array.isArray(pf.details) && typeof pf.details[0] === 'string') {
                 cands.push(`https://api.cubric.io/api/storage?fileName=${pf.details[0]}`);
@@ -196,9 +197,9 @@ export default function Navbar({ user }: NavbarProps) {
               if (pf.fileId) cands.push(pf.fileId);
               if (pf.file_id) cands.push(pf.file_id);
             }
-            if (detailRes.data.file_id) cands.push(detailRes.data.file_id);
-            if (detailRes.data.fileId) cands.push(detailRes.data.fileId);
-            const directOpts = [detailRes.data.profileImageUrl, detailRes.data.profileImage, detailRes.data.imageUrl, detailRes.data.image, detailRes.data.avatarUrl, detailRes.data.avatar_url];
+            if (detailData.file_id) cands.push(detailData.file_id);
+            if (detailData.fileId) cands.push(detailData.fileId);
+            const directOpts = [detailData.profileImageUrl, detailData.profileImage, detailData.imageUrl, detailData.image, detailData.avatarUrl, detailData.avatar_url];
             directOpts.forEach(u => { if (u) cands.push(u); });
             
             // Check for freshly uploaded Blob URL on the same window
@@ -211,8 +212,8 @@ export default function Navbar({ user }: NavbarProps) {
               const freshImg = Array.from(new Set(cands)).join(',');
               setAvatarUrl(freshImg);
             }
-            if (detailRes.data.name) {
-              setUserName(detailRes.data.name);
+            if (detailData.name) {
+              setUserName(detailData.name);
             }
           }
         }).catch(err => {
@@ -560,10 +561,23 @@ export default function Navbar({ user }: NavbarProps) {
                 <motion.button 
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
-                  onClick={() => window.dispatchEvent(new CustomEvent('open-auth'))}
+                  onClick={(e) => {
+                    const action = nav.primaryBtnAction || 'modal';
+                    const target = nav.primaryBtnTarget || 'auth';
+                    if (action === 'modal') {
+                      if (target === 'auth') window.dispatchEvent(new CustomEvent('open-auth'));
+                      else if (target === 'inquiry') window.dispatchEvent(new CustomEvent('open-inquiry'));
+                    } else if (action === 'section') {
+                      const el = document.getElementById(target.replace('#', ''));
+                      if (el) el.scrollIntoView({ behavior: 'smooth' });
+                    } else if (action === 'link') {
+                      if (target.startsWith('http')) window.open(target, '_blank');
+                      else navigate(target);
+                    }
+                  }}
                   className="bg-brand-primary text-white px-7 py-3 rounded-full text-sm font-[700] hover:shadow-lg transition-all"
                 >
-                  무료 시작하기
+                  {nav.primaryBtnText || '무료 시작하기'}
                 </motion.button>
               )}
             </div>

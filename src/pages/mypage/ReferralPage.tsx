@@ -77,7 +77,8 @@ export default function ReferralPage({ user }: ReferralPageProps) {
         // --- FETCH FROM NCP AS A FALLBACK/OVERRIDE ---
         if (localStorage.getItem('ncp_access_token')) {
           try {
-            const { data: ncpDetail } = await accountClient.get('/designer/detail');
+            const { data: ncpDetailRes } = await accountClient.get('/designer/detail');
+            const ncpDetail = ncpDetailRes?.data || ncpDetailRes?.result || ncpDetailRes?.designer || ncpDetailRes;
             if (ncpDetail && (ncpDetail.referralCode || ncpDetail.referral_code)) {
               const liveCode = ncpDetail.referralCode || ncpDetail.referral_code;
               // Override referral code with live NCP value 

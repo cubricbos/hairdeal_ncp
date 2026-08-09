@@ -1,4 +1,5 @@
 import { motion, AnimatePresence } from "motion/react";
+import { AvatarImage } from "../components/AvatarImage";
 import {
   Users,
   CreditCard,
@@ -452,23 +453,8 @@ export default function AdminPage({ user }: { user: User | null }) {
         supaProfile: profile 
       });
     } catch (err: any) {
-      console.warn('Failed to fetch designer details from core admin API, trying accountClient fallback:', err);
-      try {
-        const { data } = await accountClient.get(`/designer/detail/${profileId}`);
-        setSelectedDesignerDetail({ 
-           ...profile, 
-           ...data, 
-           provider: profile.provider || data.provider || data.signedBy || data.loginType || data.snsType || null,
-           email: profile.email || data.email || null,
-           mobileNumber: profile.mobileNumber || data.mobileNumber || null,
-           career: null,
-            
-           supaProfile: profile 
-        });
-      } catch (fallbackErr) {
-        console.error('Failed to fetch designer details from all endpoints:', fallbackErr);
-        alert('디자이너 상세 정보를 불러오는데 실패했습니다.');
-      }
+      console.error('Failed to fetch designer details from core admin API:', err);
+      alert('디자이너 상세 정보를 불러오는데 실패했습니다.');
     } finally {
       setFetchingDesignerDetail(false);
     }
@@ -922,7 +908,7 @@ export default function AdminPage({ user }: { user: User | null }) {
       }
 
       // Fetch users from NCP API (instead of Supabase)
-      let usersData: any[] | null = null;
+      let usersData: any[] = [];
       let usersError: any = null;
 
       try {
@@ -930,7 +916,7 @@ export default function AdminPage({ user }: { user: User | null }) {
         let res;
         try {
           // Use apiClient for core AdminController endpoints!
-          res = await apiClient.get('/admin/designers');
+          res = await apiClient.get('/admin/designers?page=0&size=1000');
         } catch (errFirst: any) {
           console.warn("NCP API GET `/admin/designers` failed. Detailed error print:", {
             response_data: errFirst.response?.data,
@@ -939,8 +925,7 @@ export default function AdminPage({ user }: { user: User | null }) {
             message: errFirst.message
           });
           
-          console.log("Retrying with NCP API `/designer/all` on accountClient...");
-          res = await accountClient.get('/designer/all');
+          throw errFirst;
         }
 
         let designersArray = [];
@@ -1094,12 +1079,7 @@ export default function AdminPage({ user }: { user: User | null }) {
             });
             if (res.data) ncpData = res.data;
           } catch (errFirst: any) {
-            try {
-              const res = await accountClient.get(`/designer/detail/${u.id}`);
-              if (res.data) ncpData = res.data;
-            } catch (err: any) {
-              // Fail silently since we already have the basic items data
-            }
+            // Fail silently since we already have the basic items data
           }
           let ncpAvatarUrl = ncpData.profileImageUrl || u.avatar_url;
           const cands: string[] = [];
@@ -3160,16 +3140,7 @@ export default function AdminPage({ user }: { user: User | null }) {
                             <td className="p-5">
                               <div className="flex items-center gap-3">
                                 <div className="w-10 h-10 rounded-full bg-brand-primary/10 flex items-center justify-center text-brand-primary font-bold overflow-hidden">
-                                  {profile.avatar_url ? (
-                                    <img
-                                      src={profile.avatar_url}
-                                      alt=""
-                                      className="w-full h-full object-cover"
-                                    />
-                                  ) : (
-                                    profile.full_name?.substring(0, 1) ||
-                                    profile.email?.substring(0, 1)?.toUpperCase() || "U"
-                                  )}
+                                  <AvatarImage url={profile.avatar_url} fallbackClassName="w-4 h-4 text-brand-primary" />
                                 </div>
                                 <div className="min-w-0">
                                   <p className="text-sm font-bold text-gray-900 truncate flex items-center gap-2 flex-wrap">
@@ -3518,15 +3489,7 @@ export default function AdminPage({ user }: { user: User | null }) {
                             <td className="p-5">
                               <div className="flex items-center gap-3">
                                 <div className="w-10 h-10 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-600 font-bold overflow-hidden">
-                                  {profile.avatar_url ? (
-                                    <img
-                                      src={profile.avatar_url}
-                                      alt=""
-                                      className="w-full h-full object-cover"
-                                    />
-                                  ) : (
-                                    profile.full_name?.substring(0, 1) || "A"
-                                  )}
+                                  <AvatarImage url={profile.avatar_url} fallbackClassName="w-4 h-4 text-indigo-600" />
                                 </div>
                                 <div className="min-w-0">
                                   <p className="text-sm font-bold text-gray-900 truncate">

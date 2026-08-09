@@ -114,7 +114,18 @@ export default function Pricing() {
                   const link = (plan.buttonLink || '#').trim();
                   
                   if (link === '#') {
-                      window.dispatchEvent(new CustomEvent('open-auth'));
+                    const action = settings.nav?.primaryBtnAction || 'modal';
+                    const target = settings.nav?.primaryBtnTarget || 'auth';
+                    if (action === 'modal') {
+                      if (target === 'auth') window.dispatchEvent(new CustomEvent('open-auth'));
+                      else if (target === 'inquiry') window.dispatchEvent(new CustomEvent('open-inquiry'));
+                    } else if (action === 'section') {
+                      const el = document.getElementById(target.replace('#', ''));
+                      if (el) el.scrollIntoView({ behavior: 'smooth' });
+                    } else if (action === 'link') {
+                      if (target.startsWith('http')) window.open(target, '_blank');
+                      else window.location.href = target;
+                    }
                   } else if (link === '#inquiry') {
                       window.dispatchEvent(new CustomEvent('open-inquiry'));
                   } else {

@@ -3,9 +3,48 @@ import { motion } from 'motion/react';
 import { User, Mail, Shield, Camera, Lock, Trash2, Phone, FileText, AlertTriangle, X, Briefcase, Store, Award } from 'lucide-react';
 import { supabase } from '../../supabase';
 import { useNavigate } from 'react-router-dom';
-import { accountClient } from '../../lib/ncpClient';
+import { accountClient, apiClient } from '../../lib/ncpClient';
 import { safeJwtDecode, retrySupabaseSelect } from '../../lib/supabase-utils';
-import { AvatarImage } from '../../components/AvatarImage';
+import { AvatarImage, getAvatarCandidates } from '../../components/AvatarImage';
+
+const extractCareerYears = (obj: any): string => {
+  if (!obj) return '';
+  const candidates = [
+    obj.careerYears,
+    obj.career_years,
+    obj.careerYear,
+    obj.career_year,
+    obj.experienceYears,
+    obj.experience_years,
+    obj.experienceYear,
+    obj.experience_year,
+    obj.experience,
+    obj.career,
+    obj.profile?.careerYears,
+    obj.profile?.career_years,
+    obj.profile?.careerYear,
+    obj.profile?.career_year,
+    obj.profile?.experienceYears,
+    obj.profile?.experience_years,
+    obj.profile?.experienceYear,
+    obj.profile?.experience_year,
+    obj.profile?.experience,
+    obj.profile?.career,
+    obj.designer?.careerYears,
+    obj.designer?.career_years,
+    obj.designer?.careerYear,
+    obj.designer?.experienceYears,
+    obj.designer?.experience,
+    obj.designer?.career
+  ];
+
+  for (const val of candidates) {
+    if (val !== undefined && val !== null && val !== '') {
+      return String(val);
+    }
+  }
+  return '';
+};
 
 const getProfileImageCandidates = (data: any) => {
   const list: string[] = [];
@@ -24,8 +63,10 @@ const getProfileImageCandidates = (data: any) => {
     if (data.profile.id) possibleNames.add(data.profile.id);
     if (data.profile.fileId) possibleNames.add(data.profile.fileId);
     if (data.profile.file_id) possibleNames.add(data.profile.file_id);
-    if (data.profile.details && Array.isArray(data.profile.details) && data.profile.details[0]) {
-      possibleNames.add(data.profile.details[0]);
+    if (data.profile.details && Array.isArray(data.profile.details)) {
+      data.profile.details.forEach((d: any) => {
+        if (typeof d === 'string' && d.trim()) possibleNames.add(d.trim());
+      });
     }
   }
 
@@ -34,16 +75,9 @@ const getProfileImageCandidates = (data: any) => {
   if (data.fileId) possibleNames.add(data.fileId);
   if (data.profileId) possibleNames.add(data.profileId);
   if (data.profile_id) possibleNames.add(data.profile_id);
-
-  // Generate paths for each name
-  possibleNames.forEach(name => {
-    if (!name) return;
-    list.push(`https://api.cubric.io/api/storage?fileName=${name}`);
-    list.push(`https://api.cubric.io/storage/${name}`);
-    list.push(`/api/core/storage?fileName=${name}`);
-    list.push(`/api/core/storage/${name}`);
-    list.push(`/storage/${name}`);
-  });
+  if (data.fileName) possibleNames.add(data.fileName);
+  if (data.thumbNailPath) possibleNames.add(data.thumbNailPath);
+  if (data.savedFileName) possibleNames.add(data.savedFileName);
 
   // 3. Fallbacks for direct URLs
   const directUrls = [
@@ -58,8 +92,14 @@ const getProfileImageCandidates = (data: any) => {
 
   directUrls.forEach(url => {
     if (url && typeof url === 'string' && url.trim()) {
-      list.push(url.trim());
+      possibleNames.add(url.trim());
     }
+  });
+
+  possibleNames.forEach(name => {
+    if (!name) return;
+    const cands = getAvatarCandidates(name);
+    cands.forEach(c => list.push(c));
   });
 
   return Array.from(new Set(list));
@@ -173,7 +213,8 @@ const ProfilePage: React.FC = () => {
               setName(spProfile.full_name || '');
               setNickname(spProfile.full_name || '');
               setPosition(spProfile.role || '디자이너');
-              setShopName('미등록 매장');
+              const supaShopName = spProfile.shop_name || spProfile.shopName || spProfile.hair_shop_name || spProfile.hair_shop || localStorage.getItem('ncp_shop_name') || '';
+              setShopName(supaShopName || '미등록 매장');
               setCareerYears('');
               setEmail(session.user.email || '');
               setMobileNumber(spProfile.phone || '');
@@ -204,21 +245,48 @@ const ProfilePage: React.FC = () => {
       }
 
       try {
-        const { data } = await accountClient.get('/designer/detail');
+        const { data: axiosData } = await accountClient.get('/designer/detail');
+        const data = axiosData?.data || axiosData?.result || axiosData?.designer || axiosData;
+        console.log('[Profile] NCP Profile Data loaded:', data);
         if (data && isMounted.current) {
           let finalId = decoded?.id || '';
           if (finalId && !finalId.includes('-')) {
              finalId = `${finalId.substring(0, 8)}-${finalId.substring(8, 12)}-${finalId.substring(12, 16)}-${finalId.substring(16, 20)}-${finalId.substring(20)}`;
           }
 
-          // Strictly align fields using ONLY NCP API specifications (NO Supabase fallback reading)
+          // Strictly align fields using ONLY NCP API specifications
           const backendNickname = data.nickname || data.nickName || data.name || decoded?.name || '디자이너';
-          const backendPosition = data.position || data.positionName || data.role || '디자이너';
-          const backendShopName = data.hairShop?.name || data.shopName || '미등록 매장';
-          let backendCareerYears = data.careerYears || data.experienceYears || data.experience || data.career || '';
+          const backendPosition = data.position || data.profile?.position || data.positionName || data.profile?.positionName || data.role || data.profile?.role || '디자이너';
           
-          if (!backendCareerYears && finalId) {
-             backendCareerYears = localStorage.getItem(`ncp_career_years_${finalId}`) || '';
+          let storeShopName = '';
+          const rawShopName = data.hairShop?.name || data.shopName || data.shop_name || data.profile?.shopName || data.profile?.shop_name || data.profile?.hairShop?.name;
+          if (!rawShopName || rawShopName === '미등록 매장' || rawShopName === '등록 매장') {
+            try {
+              const mgmtRes = await apiClient.get('/designer/management');
+              const mgmtData = mgmtRes?.data?.data_response?.designer || mgmtRes?.data?.data || mgmtRes?.data;
+              storeShopName = mgmtData?.hairShop?.name || mgmtData?.shopName || mgmtData?.hairShopName || '';
+            } catch (e) {}
+
+            if (!storeShopName && finalId) {
+              storeShopName = localStorage.getItem(`ncp_shop_name_${finalId}`) || localStorage.getItem('ncp_shop_name') || '';
+            }
+          }
+
+          const backendShopName = (rawShopName && rawShopName !== '미등록 매장' && rawShopName !== '등록 매장') 
+            ? rawShopName 
+            : (storeShopName || rawShopName || '미등록 매장');
+
+          let backendCareerYears = extractCareerYears(data);
+          if (!backendCareerYears) {
+            try {
+              const mgmtRes = await apiClient.get('/designer/management');
+              const mgmtData = mgmtRes?.data?.data_response?.designer || mgmtRes?.data?.data || mgmtRes?.data;
+              backendCareerYears = extractCareerYears(mgmtData);
+            } catch (e) {}
+          }
+          
+          if (!backendCareerYears) {
+             backendCareerYears = (finalId ? localStorage.getItem(`ncp_career_years_${finalId}`) : null) || localStorage.getItem('ncp_career_years') || '';
           }
 
           setProfile({
@@ -232,7 +300,7 @@ const ProfilePage: React.FC = () => {
           setCareerYears(backendCareerYears);
           setEmail(data.email || data.loginId || data.accountEmail || data.userEmail || decoded?.email || '');
           setMobileNumber(data.mobileNumber || data.mobile_number || data.phone || decoded?.mobileNumber || '');
-          setIntroduction(data.introduce || data.introduction || '');
+          setIntroduction(data.introduce || data.profile?.introduce || data.introduction || data.profile?.introduction || '');
           setReferralCode(data.referral_code || data.referralCode || '');
           
           setMarketingConsent(data.marketingAgreement || data.marketing_agreement || false);
@@ -410,6 +478,9 @@ const ProfilePage: React.FC = () => {
           formData.append('imageChanged', profileImage ? 'true' : 'false');
           formData.append('role', position || '디자이너');
           formData.append('career', String(careerYears || 0));
+          formData.append('careerYears', String(careerYears || 0));
+          formData.append('experience', String(careerYears || 0));
+          formData.append('experienceYears', String(careerYears || 0));
           formData.append('signatures', '[]');
           
           formData.append('introduce', introduction || '');
@@ -462,17 +533,17 @@ const ProfilePage: React.FC = () => {
           }
 
           if (detailRes && detailRes.data) {
-            const freshData = detailRes.data;
+            const freshData = detailRes.data?.data || detailRes.data?.result || detailRes.data?.designer || detailRes.data;
             setProfile(freshData);
             
             // Sync all visual reactive form states directly with the updated real-time NCP data
             const freshName = freshData.name || currentDecoded?.name || '디자이너';
             const freshNickname = freshData.nickname || freshData.nickName || freshData.name || currentDecoded?.name || '디자이너';
             const freshPosition = freshData.position || freshData.positionName || freshData.role || '디자이너';
-            const freshCareerYears = freshData.careerYears || freshData.experienceYears || freshData.experience || freshData.career || '';
+            const freshCareerYears = extractCareerYears(freshData) || String(careerYears || '');
             const freshEmail = freshData.email || freshData.loginId || freshData.accountEmail || freshData.userEmail || currentDecoded?.email || '';
             const freshMobile = freshData.mobileNumber || freshData.mobile_number || freshData.phone || currentDecoded?.mobileNumber || '';
-            const freshIntro = freshData.introduce || freshData.introduction || '';
+            const freshIntro = freshData.introduce || freshData.profile?.introduce || freshData.introduction || freshData.profile?.introduction || '';
             const freshMarketing = freshData.marketingAgreement || freshData.marketing_agreement || false;
             const freshAiImage = freshData.aiImageAgreement || freshData.ai_image_agreement || false;
             const freshAiVideo = freshData.aiVideoAgreement || freshData.ai_video_agreement || false;
@@ -586,8 +657,9 @@ const ProfilePage: React.FC = () => {
         }
       }
 
-      if (targetUserId) {
-        if (careerYears) {
+      if (careerYears !== undefined && careerYears !== null && careerYears !== '') {
+        localStorage.setItem('ncp_career_years', String(careerYears));
+        if (targetUserId) {
           localStorage.setItem(`ncp_career_years_${targetUserId}`, String(careerYears));
         }
       }
