@@ -2169,6 +2169,15 @@ export default function AdminPage({ user }: { user: User | null }) {
     },
   ];
 
+  useEffect(() => {
+    if (!isAdmin) {
+      navigate('/');
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('open-auth'));
+      }, 100);
+    }
+  }, [isAdmin, navigate]);
+
   if (!isAdmin) return null;
 
   const handleDeleteUser = async (userId: string) => {

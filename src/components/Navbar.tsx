@@ -574,52 +574,27 @@ export default function Navbar({ user }: NavbarProps) {
                   </AnimatePresence>
                 </div>
               ) : (
-                <div className="flex items-center gap-3">
-                  {nav.primaryBtnText && (
-                    <motion.button 
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.95 }}
-                      onClick={(e) => {
-                        const action = nav.primaryBtnAction || 'modal';
-                        const target = nav.primaryBtnTarget || 'auth';
-                        if (action === 'modal') {
-                          if (target === 'auth') window.dispatchEvent(new CustomEvent('open-auth'));
-                          else if (target === 'inquiry') window.dispatchEvent(new CustomEvent('open-inquiry'));
-                        } else if (action === 'section') {
-                          const el = document.getElementById(target.replace('#', ''));
-                          if (el) el.scrollIntoView({ behavior: 'smooth' });
-                        } else if (action === 'link') {
-                          if (target.startsWith('http')) window.open(target, '_blank');
-                          else navigate(target);
-                        }
-                      }}
-                      className="text-gray-700 bg-gray-100/50 hover:bg-gray-100 px-6 py-3 rounded-full text-sm font-bold transition-all"
-                    >
-                      {nav.primaryBtnText}
-                    </motion.button>
-                  )}
-                  <motion.button 
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    onClick={(e) => {
-                      const action = nav.loginBtnAction || 'modal';
-                      const target = nav.loginBtnTarget || 'auth';
-                      if (action === 'modal') {
-                        if (target === 'auth') window.dispatchEvent(new CustomEvent('open-auth'));
-                        else if (target === 'inquiry') window.dispatchEvent(new CustomEvent('open-inquiry'));
-                      } else if (action === 'section') {
-                        const el = document.getElementById(target.replace('#', ''));
-                        if (el) el.scrollIntoView({ behavior: 'smooth' });
-                      } else if (action === 'link') {
-                        if (target.startsWith('http')) window.open(target, '_blank');
-                        else navigate(target);
-                      }
-                    }}
-                    className="bg-brand-primary text-white px-7 py-3 rounded-full text-sm font-[700] hover:shadow-lg transition-all"
-                  >
-                    {nav.loginBtnText || '무료 시작하기'}
-                  </motion.button>
-                </div>
+                <motion.button 
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={(e) => {
+                    const action = nav.primaryBtnAction || 'modal';
+                    const target = nav.primaryBtnTarget || 'auth';
+                    if (action === 'modal') {
+                      if (target === 'auth') window.dispatchEvent(new CustomEvent('open-auth'));
+                      else if (target === 'inquiry') window.dispatchEvent(new CustomEvent('open-inquiry'));
+                    } else if (action === 'section') {
+                      const el = document.getElementById(target.replace('#', ''));
+                      if (el) el.scrollIntoView({ behavior: 'smooth' });
+                    } else if (action === 'link') {
+                      if (target.startsWith('http')) window.open(target, '_blank');
+                      else navigate(target);
+                    }
+                  }}
+                  className="bg-brand-primary text-white px-7 py-3 rounded-full text-sm font-[700] hover:shadow-lg transition-all"
+                >
+                  {nav.primaryBtnText || '무료 시작하기'}
+                </motion.button>
               )}
             </div>
 

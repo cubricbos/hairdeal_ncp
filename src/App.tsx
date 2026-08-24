@@ -48,6 +48,17 @@ import { User } from '@supabase/supabase-js';
 import { accountClient } from './lib/ncpClient';
 import { retrySupabaseSelect, safeJwtDecode } from './lib/supabase-utils';
 
+
+function AdminLoginRedirect() {
+  const navigate = useNavigate();
+  useEffect(() => {
+    navigate('/', { replace: true });
+    setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('open-auth'));
+    }, 100);
+  }, [navigate]);
+  return null;
+}
 function LandingPage({ setIsAuthOpen, user }: { setIsAuthOpen: (val: boolean) => void, user: User | null }) {
   const { settings, isLoading } = useSiteContext();
   const order = settings?.sectionOrder || ['features', 'aiDemo', 'pricing', 'partners', 'layer_1'];
@@ -840,7 +851,7 @@ function AppContent() {
         <Route path="/ai-hair-model_app" element={<AiHairModelAppPage user={user} />} />
         <Route path="/admin" element={<AdminPage user={user} />} />
         <Route path="/admin/test" element={<TestPage />} />
-        <Route path="/admin/login" element={<AdminLoginPage />} />
+        <Route path="/admin/login" element={<AdminLoginRedirect />} />
         <Route path="/admin/site-editor" element={<SiteEditorPage user={user} />} />
         <Route path="/admin/shop" element={<ShopManagementPage user={user} />} />
         <Route path="/admin/store" element={<StoreManagementPage user={user} />} />
