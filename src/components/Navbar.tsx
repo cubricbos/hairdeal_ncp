@@ -390,31 +390,47 @@ export default function Navbar({ user }: NavbarProps) {
                 </Link>
               ))}
               
-              <div className="relative" ref={langRef}>
-                <button 
-                  onClick={() => setIsLangOpen(!isLangOpen)}
-                  className="flex items-center gap-2 text-[15px] font-bold text-gray-700 hover:text-brand-primary transition-colors"
-                >
-                  <Globe className="w-5 h-5" />
-                  <span className="uppercase">{currentLang === 'ja' ? 'JA' : currentLang === 'en' ? 'EN' : 'KO'}</span>
-                  <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${isLangOpen ? 'rotate-180' : ''}`} />
-                </button>
-                <AnimatePresence>
-                  {isLangOpen && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                      transition={{ duration: 0.15 }}
-                      className="absolute right-0 mt-3 w-32 bg-white rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] border border-gray-100 py-2 overflow-hidden z-[2001]"
-                    >
-                      <button onClick={() => changeLanguage('ko')} className={`w-full text-left px-5 py-2.5 text-sm font-bold hover:bg-gray-50 transition-colors ${currentLang === 'ko' ? 'text-brand-primary' : 'text-gray-700'}`}>한국어</button>
-                      <button onClick={() => changeLanguage('en')} className={`w-full text-left px-5 py-2.5 text-sm font-bold hover:bg-gray-50 transition-colors ${currentLang === 'en' ? 'text-brand-primary' : 'text-gray-700'}`}>English</button>
-                      <button onClick={() => changeLanguage('ja')} className={`w-full text-left px-5 py-2.5 text-sm font-bold hover:bg-gray-50 transition-colors ${currentLang === 'ja' ? 'text-brand-primary' : 'text-gray-700'}`}>日本語</button>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
+              {nav.languageSettings?.enabled && (
+                <div className="relative" ref={langRef}>
+                  <button 
+                    onClick={() => setIsLangOpen(!isLangOpen)}
+                    className="flex items-center gap-2 text-[15px] font-bold text-gray-700 hover:text-brand-primary transition-colors"
+                  >
+                    <Globe className="w-5 h-5" />
+                    <span className="uppercase">{currentLang.toUpperCase()}</span>
+                    <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${isLangOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  <AnimatePresence>
+                    {isLangOpen && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                        transition={{ duration: 0.15 }}
+                        className="absolute right-0 mt-3 w-32 bg-white rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] border border-gray-100 py-2 overflow-hidden z-[2001]"
+                      >
+                        {nav.languageSettings?.availableLanguages?.map((lang) => {
+                          const langNames: Record<string, string> = {
+                            'ko': '한국어',
+                            'en': 'English',
+                            'ja': '日本語',
+                            'zh': '中文',
+                            'es': 'Español',
+                            'fr': 'Français',
+                            'vi': 'Tiếng Việt',
+                            'th': 'ภาษาไทย',
+                          };
+                          return (
+                            <button key={lang} onClick={() => changeLanguage(lang)} className={`w-full text-left px-5 py-2.5 text-sm font-bold hover:bg-gray-50 transition-colors ${currentLang === lang ? 'text-brand-primary' : 'text-gray-700'}`}>
+                              {langNames[lang] || lang.toUpperCase()}
+                            </button>
+                          );
+                        })}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              )}
 
               {user ? (
                 <div className="relative" ref={dropdownRef}>
@@ -558,27 +574,52 @@ export default function Navbar({ user }: NavbarProps) {
                   </AnimatePresence>
                 </div>
               ) : (
-                <motion.button 
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={(e) => {
-                    const action = nav.primaryBtnAction || 'modal';
-                    const target = nav.primaryBtnTarget || 'auth';
-                    if (action === 'modal') {
-                      if (target === 'auth') window.dispatchEvent(new CustomEvent('open-auth'));
-                      else if (target === 'inquiry') window.dispatchEvent(new CustomEvent('open-inquiry'));
-                    } else if (action === 'section') {
-                      const el = document.getElementById(target.replace('#', ''));
-                      if (el) el.scrollIntoView({ behavior: 'smooth' });
-                    } else if (action === 'link') {
-                      if (target.startsWith('http')) window.open(target, '_blank');
-                      else navigate(target);
-                    }
-                  }}
-                  className="bg-brand-primary text-white px-7 py-3 rounded-full text-sm font-[700] hover:shadow-lg transition-all"
-                >
-                  {nav.primaryBtnText || '무료 시작하기'}
-                </motion.button>
+                <div className="flex items-center gap-3">
+                  {nav.primaryBtnText && (
+                    <motion.button 
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      onClick={(e) => {
+                        const action = nav.primaryBtnAction || 'modal';
+                        const target = nav.primaryBtnTarget || 'auth';
+                        if (action === 'modal') {
+                          if (target === 'auth') window.dispatchEvent(new CustomEvent('open-auth'));
+                          else if (target === 'inquiry') window.dispatchEvent(new CustomEvent('open-inquiry'));
+                        } else if (action === 'section') {
+                          const el = document.getElementById(target.replace('#', ''));
+                          if (el) el.scrollIntoView({ behavior: 'smooth' });
+                        } else if (action === 'link') {
+                          if (target.startsWith('http')) window.open(target, '_blank');
+                          else navigate(target);
+                        }
+                      }}
+                      className="text-gray-700 bg-gray-100/50 hover:bg-gray-100 px-6 py-3 rounded-full text-sm font-bold transition-all"
+                    >
+                      {nav.primaryBtnText}
+                    </motion.button>
+                  )}
+                  <motion.button 
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={(e) => {
+                      const action = nav.loginBtnAction || 'modal';
+                      const target = nav.loginBtnTarget || 'auth';
+                      if (action === 'modal') {
+                        if (target === 'auth') window.dispatchEvent(new CustomEvent('open-auth'));
+                        else if (target === 'inquiry') window.dispatchEvent(new CustomEvent('open-inquiry'));
+                      } else if (action === 'section') {
+                        const el = document.getElementById(target.replace('#', ''));
+                        if (el) el.scrollIntoView({ behavior: 'smooth' });
+                      } else if (action === 'link') {
+                        if (target.startsWith('http')) window.open(target, '_blank');
+                        else navigate(target);
+                      }
+                    }}
+                    className="bg-brand-primary text-white px-7 py-3 rounded-full text-sm font-[700] hover:shadow-lg transition-all"
+                  >
+                    {nav.loginBtnText || '무료 시작하기'}
+                  </motion.button>
+                </div>
               )}
             </div>
 
@@ -664,11 +705,15 @@ export default function Navbar({ user }: NavbarProps) {
                   style={{ zIndex: menuView === 'main' ? 20 : 10 }}
                 >
                   {/* Mobile Language Selector */}
-                  <div className="flex justify-around bg-gray-50 p-1.5 rounded-xl mb-6 text-sm font-bold">
-                    <button onClick={() => changeLanguage('ko')} className={`px-3 py-2 rounded-lg flex-1 text-center transition-all ${currentLang === 'ko' ? 'bg-white shadow-sm text-brand-primary' : 'text-gray-500 hover:text-gray-700'}`}>KO</button>
-                    <button onClick={() => changeLanguage('en')} className={`px-3 py-2 rounded-lg flex-1 text-center transition-all ${currentLang === 'en' ? 'bg-white shadow-sm text-brand-primary' : 'text-gray-500 hover:text-gray-700'}`}>EN</button>
-                    <button onClick={() => changeLanguage('ja')} className={`px-3 py-2 rounded-lg flex-1 text-center transition-all ${currentLang === 'ja' ? 'bg-white shadow-sm text-brand-primary' : 'text-gray-500 hover:text-gray-700'}`}>JA</button>
-                  </div>
+                  {nav.languageSettings?.enabled && nav.languageSettings?.availableLanguages && nav.languageSettings.availableLanguages.length > 0 && (
+                    <div className="flex flex-wrap gap-1 justify-around bg-gray-50 p-1.5 rounded-xl mb-6 text-sm font-bold">
+                      {nav.languageSettings.availableLanguages.map((lang) => (
+                        <button key={lang} onClick={() => changeLanguage(lang)} className={`px-3 py-2 rounded-lg flex-1 text-center min-w-[60px] transition-all ${currentLang === lang ? 'bg-white shadow-sm text-brand-primary' : 'text-gray-500 hover:text-gray-700'}`}>
+                          {lang.toUpperCase()}
+                        </button>
+                      ))}
+                    </div>
+                  )}
 
                   {/* Dynamic Menu Items based on Login State */}
                   <div className="flex flex-col gap-1 mb-8">
@@ -762,11 +807,25 @@ export default function Navbar({ user }: NavbarProps) {
                           </Link>
                         ))}
                         <button 
-                          onClick={() => { setIsOpen(false); window.dispatchEvent(new CustomEvent('open-auth')); }}
+                          onClick={(e) => {
+                            setIsOpen(false);
+                            const action = nav.primaryBtnAction || 'modal';
+                            const target = nav.primaryBtnTarget || 'auth';
+                            if (action === 'modal') {
+                              if (target === 'auth') window.dispatchEvent(new CustomEvent('open-auth'));
+                              else if (target === 'inquiry') window.dispatchEvent(new CustomEvent('open-inquiry'));
+                            } else if (action === 'section') {
+                              const el = document.getElementById(target.replace('#', ''));
+                              if (el) el.scrollIntoView({ behavior: 'smooth' });
+                            } else if (action === 'link') {
+                              if (target.startsWith('http')) window.open(target, '_blank');
+                              else navigate(target);
+                            }
+                          }}
                           className="flex items-center gap-3.5 py-4.5 px-6 text-[17px] font-bold text-brand-primary bg-brand-primary/5 rounded-2xl mt-4 active:scale-95 transition-transform border border-brand-primary/10"
                         >
                           <LogIn className="w-5.5 h-5.5" />
-                          로그인하기
+                          {nav.primaryBtnText || '무료 시작하기'}
                         </button>
                       </>
                     )}

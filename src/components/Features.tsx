@@ -45,7 +45,7 @@ export default function Features() {
           </motion.p>
         </div>
 
-        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 md:gap-6 lg:gap-8">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-6 lg:gap-8">
           {featuresList.map((feature, index) => {
             const colorClass = colorArray[index % colorArray.length];
             const iconType = feature.iconType || 'lucide';

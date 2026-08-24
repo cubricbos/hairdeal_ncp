@@ -498,7 +498,7 @@ async function startServer() {
             console.log(`[LocalAlbumInterception] Live fetch succeeded.`);
             return res.status(ncpRes.status).json(ncpRes.data);
           } catch (ncpErr: any) {
-            console.log(`[LocalAlbumInterception] Live fetch failed with status ${ncpErr.response?.status || ncpErr.message}. Returning elegant empty array fallback.`);
+            console.log(`[LocalAlbumInterception] Live fetch unavailable (status ${ncpErr.response?.status || ncpErr.message}. Returning elegant empty array fallback.`);
             // Return empty portfolio content list gracefully instead of 400/500/401 error
             return res.json({
               data: {
@@ -553,11 +553,33 @@ async function startServer() {
         console.log(`[LocalAdminDesignersInterception] Live fetch succeeded.`);
         return res.status(ncpRes.status).json(ncpRes.data);
       } catch (ncpErr: any) {
-        console.log(`[LocalAdminDesignersInterception] Live fetch failed with status ${ncpErr.response?.status || ncpErr.message}. Returning elegant empty array fallback.`);
+        console.log(`[LocalAdminDesignersInterception] Live fetch bypassed. Using Supabase profiles.`);
+        try {
+          if (getSupabaseAdmin()) {
+            const { data } = await getSupabaseAdmin()
+              .from('profiles')
+              .select('*')
+              .order('created_at', { ascending: false });
+            return res.json({ items: data || [], content: data || [] });
+          }
+        } catch (dbErr) {
+          console.error('[LocalAdminDesignersInterception] DB fallback failed', dbErr);
+        }
         return res.json({ items: [], content: [] });
       }
     } else {
-       console.log(`[LocalAdminDesignersInterception] No token found, returning elegant empty list fallback.`);
+       console.log(`[LocalAdminDesignersInterception] No token found, falling back to Supabase profiles.`);
+       try {
+         if (getSupabaseAdmin()) {
+           const { data } = await getSupabaseAdmin()
+             .from('profiles')
+             .select('*')
+             .order('created_at', { ascending: false });
+           return res.json({ items: data || [], content: data || [] });
+         }
+       } catch (dbErr) {
+         console.error('[LocalAdminDesignersInterception] DB fallback failed', dbErr);
+       }
        return res.json({ items: [], content: [] });
     }
   });
@@ -583,55 +605,69 @@ async function startServer() {
         console.log(`[LocalAdminDesignerDetailInterception] Live fetch succeeded.`);
         return res.status(ncpRes.status).json(ncpRes.data);
       } catch (ncpErr: any) {
-        console.log(`[LocalAdminDesignerDetailInterception] Live fetch failed with status ${ncpErr.response?.status || ncpErr.message}. Returning elegant empty object fallback.`);
+        console.log(`[LocalAdminDesignerDetailInterception] Live fetch bypassed. Using Supabase profile.`);
+        try {
+          const designerId = req.query.designerId as string;
+          if (getSupabaseAdmin() && designerId) {
+            const { data } = await getSupabaseAdmin()
+              .from('profiles')
+              .select('*')
+              .eq('id', designerId)
+              .maybeSingle();
+            if (data) return res.json(data);
+          }
+        } catch (dbErr) {
+          console.error('[LocalAdminDesignerDetailInterception] DB fallback failed', dbErr);
+        }
         return res.json({});
       }
     } else {
-       console.log(`[LocalAdminDesignerDetailInterception] No token found, returning elegant empty object fallback.`);
+       console.log(`[LocalAdminDesignerDetailInterception] No token found, falling back to Supabase.`);
+       try {
+         const designerId = req.query.designerId as string;
+         if (getSupabaseAdmin() && designerId) {
+           const { data } = await getSupabaseAdmin()
+             .from('profiles')
+             .select('*')
+             .eq('id', designerId)
+             .maybeSingle();
+           if (data) return res.json(data);
+         }
+       } catch (dbErr) {
+         console.error('[LocalAdminDesignerDetailInterception] DB fallback failed', dbErr);
+       }
        return res.json({});
     }
   });
 
-  // [LOCAL INTERCEPTION] Gracefully intercept faceswap/models for locally signed JWT tokens to avoid 400 Bad Request
-  app.get('/api/core/faceswap/models', async (req, res, next) => {
+  // [LOCAL INTERCEPTION] Gracefully intercept faceswap/models to avoid 400/500 errors from NCP
+  app.get('/api/core/faceswap/models', async (req, res) => {
     console.log(`[LocalModelsInterception] GET /api/core/faceswap/models requested.`);
     const authHeader = req.headers.authorization;
     const token = authHeader ? (authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader).trim() : null;
     
     if (token) {
-      const secret = process.env.VITE_NCP_JWT_DESIGNER_SECRET_KEY || process.env.NCP_JWT_SECRET || '0cub6zbqmflr0ric1d';
+      const targetUrl = (process.env.CORE_SERVER_URL || 'http://hairdeal.cubric.io') + '/api/faceswap/models';
       try {
-        const decoded = jwt.verify(token, secret) as any;
-        if (decoded && decoded.id) {
-          console.log(`[LocalModelsInterception] Token verified locally for user: ${decoded.email}. Trying live server fetch first...`);
-          
-          // Try to fetch from the real NCP server using this token
-          const targetUrl = (process.env.CORE_SERVER_URL || 'http://hairdeal.cubric.io') + '/api/faceswap/models';
-          try {
-            const ncpRes = await axios.get(targetUrl, {
-              headers: {
-                'Authorization': `Bearer ${token}`,
-                'x-cubric-designer-token': token,
-                'User-Agent': 'Mozilla/5.0'
-              },
-              params: req.query,
-              timeout: 6000
-            });
-            console.log(`[LocalModelsInterception] Live fetch succeeded.`);
-            return res.status(ncpRes.status).json(ncpRes.data);
-          } catch (ncpErr: any) {
-            console.log(`[LocalModelsInterception] Live fetch failed with status ${ncpErr.response?.status || ncpErr.message}. Returning elegant empty list fallback.`);
-            return res.json({ data: [] });
-          }
-        }
-      } catch (err) {
-        // Verification failed, let proxy handle it
+        const ncpRes = await axios.get(targetUrl, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'x-cubric-designer-token': token,
+            'User-Agent': 'Mozilla/5.0'
+          },
+          params: req.query,
+          timeout: 6000
+        });
+        console.log(`[LocalModelsInterception] Live fetch succeeded.`);
+        return res.status(ncpRes.status).json(ncpRes.data);
+      } catch (ncpErr: any) {
+        console.log(`[LocalModelsInterception] Live fetch returned status ${ncpErr.response?.status || ncpErr.message}. Returning empty list fallback.`);
+        return res.json({ data: [] });
       }
     } else {
-      console.log(`[LocalModelsInterception] No token found, returning elegant empty list fallback.`);
+      console.log(`[LocalModelsInterception] No token found, returning empty list fallback.`);
       return res.json({ data: [] });
     }
-    next();
   });
 
   app.use('/api/account', (req, res, next) => {
@@ -882,6 +918,83 @@ const getSupabaseAdmin = () => {
       }
     });
   };
+
+  // [VISITOR LOGS API] Handle posting and fetching visitor logs securely with Service Role
+  const handleGetVisitorLogs = async (req, res) => {
+    try {
+      const admin = getSupabaseAdmin();
+      if (!admin) {
+        return res.status(500).json({ error: 'Supabase admin client not available' });
+      }
+
+      const limit = parseInt(req.query.limit) || 1000;
+      const { data, error } = await admin
+        .from('visitor_logs')
+        .select('*')
+        .order('visited_at', { ascending: false })
+        .limit(limit);
+
+      if (error) {
+        console.error('[VisitorLogs] GET error:', error);
+        return res.status(500).json({ error: error.message });
+      }
+
+      return res.json({ success: true, data: data || [] });
+    } catch (err) {
+      console.error('[VisitorLogs] GET exception:', err);
+      return res.status(500).json({ error: err.message || 'Internal server error' });
+    }
+  };
+
+  const handlePostVisitorLog = async (req, res) => {
+    try {
+      const admin = getSupabaseAdmin();
+      if (!admin) {
+        return res.status(500).json({ error: 'Supabase admin client not available' });
+      }
+
+      const body = req.body || {};
+      let clientIp = body.ip_address;
+
+      if (!clientIp || clientIp === 'unknown' || clientIp === '127.0.0.1' || clientIp === '::1') {
+        const xForwardedFor = req.headers['x-forwarded-for'];
+        if (typeof xForwardedFor === 'string') {
+          clientIp = xForwardedFor.split(',')[0].trim();
+        } else if (Array.isArray(xForwardedFor)) {
+          clientIp = xForwardedFor[0].trim();
+        } else {
+          clientIp = req.socket.remoteAddress || 'unknown';
+        }
+      }
+
+      const logEntry = {
+        ip_address: clientIp || 'unknown',
+        location: body.location || 'Unknown',
+        latitude: body.latitude !== undefined && body.latitude !== null ? Number(body.latitude) : null,
+        longitude: body.longitude !== undefined && body.longitude !== null ? Number(body.longitude) : null,
+        user_agent: body.user_agent || req.headers['user-agent'] || 'Unknown',
+        referrer: body.referrer || req.headers['referer'] || 'Direct',
+        visited_at: body.visited_at || new Date().toISOString()
+      };
+
+      const { data, error } = await admin.from('visitor_logs').insert([logEntry]).select();
+
+      if (error) {
+        console.error('[VisitorLogs] POST error:', error);
+        return res.status(500).json({ error: error.message });
+      }
+
+      return res.json({ success: true, log: data?.[0] });
+    } catch (err) {
+      console.error('[VisitorLogs] POST exception:', err);
+      return res.status(500).json({ error: err.message || 'Internal server error' });
+    }
+  };
+
+  app.get('/api/visitor_logs', handleGetVisitorLogs);
+  app.get('/api/visitor-logs', handleGetVisitorLogs);
+  app.post('/api/visitor_logs', handlePostVisitorLog);
+  app.post('/api/visitor-logs', handlePostVisitorLog);
 
   // Token Verification utility for NCP tokens
   const getDesignerByToken = async (token: string) => {

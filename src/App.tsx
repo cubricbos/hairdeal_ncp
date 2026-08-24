@@ -52,14 +52,7 @@ function LandingPage({ setIsAuthOpen, user }: { setIsAuthOpen: (val: boolean) =>
   const { settings, isLoading } = useSiteContext();
   const order = settings?.sectionOrder || ['features', 'aiDemo', 'pricing', 'partners', 'layer_1'];
 
-  // Only show full black screem loading if absolutely NO settings are loaded and it's fetching
-  if (isLoading && settings === defaultSiteSettings) {
-    return (
-      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: '#000000' }}>
-        <div className="w-8 h-8 border-4 border-white/20 border-t-white rounded-full animate-spin" />
-      </div>
-    );
-  }
+
 
   return (
     <main>
@@ -100,7 +93,7 @@ function AppContent() {
   const [isAuthInitialized, setIsAuthInitialized] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  const { settings } = useSiteContext();
+  const { settings, isLoading } = useSiteContext();
   const isMounted = useRef(true);
   const lastVerifiedNcpToken = useRef<string | null>(null);
 
@@ -807,7 +800,7 @@ function AppContent() {
     navigate('/mypage/subscription');
   };
 
-  if (!isAuthInitialized) {
+  if (!isAuthInitialized || (isLoading && settings === defaultSiteSettings)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-black">
         <div className="w-8 h-8 border-4 border-white/20 border-t-brand-primary rounded-full animate-spin" />

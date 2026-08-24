@@ -72,17 +72,33 @@ export function useMetrics() {
 
         // 1. ALWAYS log the visit (regardless of toggle)
         try {
-          await supabase.from('visitor_logs').insert([{
-            ip_address: currentIp,
-            location: location,
-            latitude: latitude,
-            longitude: longitude,
-            user_agent: getOS(), // Log parsed OS instead of raw UA for better readable admin view
-            referrer: document.referrer || 'Direct',
-            visited_at: new Date().toISOString()
-          }]);
+          const apiRes = await fetch('/api/visitor_logs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              ip_address: currentIp,
+              location: location,
+              latitude: latitude,
+              longitude: longitude,
+              user_agent: getOS(),
+              referrer: document.referrer || 'Direct',
+              visited_at: new Date().toISOString()
+            })
+          });
+          if (!apiRes.ok) throw new Error(`HTTP ${apiRes.status}`);
         } catch (e) {
-          console.warn("Visitor log could not be saved.");
+          console.warn("Visitor log API failed, trying direct Supabase insert fallback.");
+          try {
+            await supabase.from('visitor_logs').insert([{
+              ip_address: currentIp,
+              location: location,
+              latitude: latitude,
+              longitude: longitude,
+              user_agent: getOS(),
+              referrer: document.referrer || 'Direct',
+              visited_at: new Date().toISOString()
+            }]);
+          } catch (_) {}
         }
 
         // 2. Fetch settings - Check if duplication prevention is toggled

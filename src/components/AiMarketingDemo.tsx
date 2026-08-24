@@ -222,7 +222,7 @@ export default function AiMarketingDemo({ user }: { user?: User | null; key?: Re
   };
 
   return (
-    <section id="marketing" className={`py-24 overflow-hidden relative ${aiDemo.useWhiteBg ? 'bg-white' : 'bg-gray-50'}`}>
+    <section id="solution" className={`pt-24 pb-8 overflow-hidden relative ${aiDemo.useWhiteBg ? 'bg-white' : 'bg-gray-50'}`}>
       <div className="absolute top-0 right-0 w-1/3 h-1/2 bg-brand-primary/5 blur-[120px] rounded-full pointer-events-none" />
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-10 relative z-10">
         

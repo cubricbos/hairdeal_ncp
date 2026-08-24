@@ -4,6 +4,7 @@ import { useSiteContext } from '../context/SiteContext';
 import { SiteSettings } from '../lib/siteSettings';
 
 export default function LayerSection({ layer }: { layer: NonNullable<SiteSettings['layers']>[0]; key?: React.Key }) {
+  const { settings } = useSiteContext();
   if (layer.hidden) return null;
 
   return (

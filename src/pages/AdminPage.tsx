@@ -1137,11 +1137,15 @@ export default function AdminPage({ user }: { user: User | null }) {
         } catch (e) {}
       } else {
         if (!isMountedRef.current) return;
-        // Since we are explicitly requested to NOT fallback to Supabase for the designers, we set designers to empty
-        // but still maintain the Supabase admin accounts loaded to let internal management work
-        setProfiles(supabaseAdmins);
-        setTotalUsers(0);
-        console.warn("No designer profiles loaded from NCP due to failure. Internal staff loaded:", supabaseAdmins.length);
+        
+        // Fallback to supabase designers
+        const { data: allSupabaseUsers } = await supabase.from('profiles').select('*').order('created_at', { ascending: false });
+        
+        // Merge the staff/admin accounts from Supabase with the partner/designer list from Supabase
+        const combinedProfiles = allSupabaseUsers || supabaseAdmins;
+        setProfiles(combinedProfiles);
+        setTotalUsers((allSupabaseUsers || []).filter((u: any) => !u.is_admin).length);
+        console.log("Using Supabase designer profiles. Fallback to Supabase:", combinedProfiles.length);
       }
 
       // Fetch duplicated IP setting & Credit setting
@@ -1184,23 +1188,39 @@ export default function AdminPage({ user }: { user: User | null }) {
           setReferralActivityReward(metricsData.referral_activity_reward);
       }
 
-      // Fetch Visitor Logs
-      const { data: logsData, error: logsDataError } = await supabase
-        .from("visitor_logs")
-        .select("*")
-        .order("visited_at", { ascending: false })
-        .limit(100);
-
-      if (logsDataError) {
-        if (logsDataError.code === "42P01") {
-          setLogsError(
-            "Supabase에 visitor_logs 테이블이 생성되지 않았습니다.",
-          );
+      // Fetch Visitor Logs via API (Service Role) with Supabase fallback
+      try {
+        const res = await fetch('/api/visitor_logs?limit=1000');
+        if (res.ok) {
+          const json = await res.json();
+          if (json.data && Array.isArray(json.data)) {
+            setVisitorLogs(json.data);
+            setLogsError(null);
+          } else {
+            throw new Error(json.error || 'Failed to fetch visitor logs');
+          }
         } else {
-          setLogsError(logsDataError.message);
+          throw new Error(`HTTP ${res.status}`);
         }
-      } else {
-        setVisitorLogs(logsData || []);
+      } catch (apiErr) {
+        console.warn("API fetch visitor_logs failed, falling back to direct Supabase select:", apiErr);
+        const { data: logsData, error: logsDataError } = await supabase
+          .from("visitor_logs")
+          .select("*")
+          .order("visited_at", { ascending: false })
+          .limit(100);
+
+        if (logsDataError) {
+          if (logsDataError.code === "42P01") {
+            setLogsError(
+              "Supabase에 visitor_logs 테이블이 생성되지 않았습니다.",
+            );
+          } else {
+            setLogsError(logsDataError.message);
+          }
+        } else {
+          setVisitorLogs(logsData || []);
+        }
       }
 
       // Fetch Hair Styles

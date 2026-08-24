@@ -221,18 +221,19 @@
 }
 
 /* Focus Mode Adjustments */
-div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section#solution:nth-of-type(3) {
-  padding-top: 0px !important;
+div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section#solution:nth-of-type(3),
+div#root:nth-of-type(2) > div:nth-of-type(1) > main:nth-of-type(1) > section#solution:nth-of-type(3),
+section#solution,
+section#marketing {
+  padding-top: 40px !important;
   padding-bottom: 0px !important;
+  margin-bottom: 0px !important;
 }
 
-div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section#solution:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) {
-  padding-bottom: 40px !important;
-  padding-top: 0px !important;
-}
-
-div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section#solution:nth-of-type(3) > div:nth-of-type(1) {
-  padding-top: 120px !important;
+div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section#solution:nth-of-type(3) > div:nth-of-type(1),
+div#root:nth-of-type(2) > div:nth-of-type(1) > main:nth-of-type(1) > section#solution:nth-of-type(3) > div:nth-of-type(1) {
+  padding-top: 40px !important;
+  padding-bottom: 0px !important;
 }
 
 div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(4) > footer:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > h4:nth-of-type(1),

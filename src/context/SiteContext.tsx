@@ -20,25 +20,33 @@ const SiteContext = createContext<SiteContextProps>({
 export const useSiteContext = () => useContext(SiteContext);
 
 export const SiteProvider = ({ children }: { children: ReactNode }) => {
-  const [settings, setSettings] = useState<SiteSettings>(defaultSiteSettings);
-  const [isLoading, setIsLoading] = useState(true);
+  const [settings, setSettings] = useState<SiteSettings>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = localStorage.getItem('siteSettingsFallback');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          const mergedCache = { ...defaultSiteSettings, ...parsed };
+          if (mergedCache.features) {
+             mergedCache.features.items = defaultSiteSettings.features.items;
+          }
+          return mergedCache;
+        }
+      } catch (e) {}
+    }
+    return defaultSiteSettings;
+  });
+  // If we found a cache synchronously, we can consider initial load 'done' for UI purposes (we still fetch silently)
+  const [isLoading, setIsLoading] = useState(() => settings === defaultSiteSettings);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Check local storage fallback first to prevent flickers
-    const cached = localStorage.getItem('siteSettingsFallback');
-    let loadedFromCache = false;
-    if (cached) {
-      try { 
-        const parsed = JSON.parse(cached);
-        // Ensure new top-level settings are merged with cached version
-        setSettings({ ...defaultSiteSettings, ...parsed }); 
-        loadedFromCache = true;
-      } catch(e) {}
-    }
-
     const fetchSettings = async () => {
-      if (!loadedFromCache) setIsLoading(true);
+      // Always fetch to ensure latest, but don't show loading spinner if we already have cache
+      if (settings === defaultSiteSettings) {
+         setIsLoading(true);
+      }
+      
       try {
         const { data, error } = await retrySupabaseSelect<any>(() => supabase
           .from('site_settings')
@@ -79,6 +87,10 @@ export const SiteProvider = ({ children }: { children: ReactNode }) => {
              }
            });
 
+           // Force update features
+           if (merged.features) {
+             merged.features.items = defaultSiteSettings.features.items;
+           }
            setSettings(merged);
            localStorage.setItem('siteSettingsFallback', JSON.stringify(merged));
         } else if (error && error.code !== 'PGRST116') {
