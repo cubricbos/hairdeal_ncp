@@ -9,10 +9,6 @@
       "destination": "http://hairdeal.cubric.io/api/designer/:match*"
     },
     {
-      "source": "/api/admin/:match*",
-      "destination": "http://hairdeal.cubric.io/api/admin/:match*"
-    },
-    {
       "source": "/api/(.*)",
       "destination": "/api/index"
     },

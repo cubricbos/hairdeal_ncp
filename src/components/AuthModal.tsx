@@ -685,7 +685,10 @@ const handleFinalSignUpAndRegister = async () => {
             name: "관리자 (System Admin)",
             mobileNumber: "010-1234-5678"
           };
-          const base64Payload = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+          const base64Payload = btoa(unescape(encodeURIComponent(JSON.stringify(payload))))
+            .replace(/=/g, '')
+            .replace(/\+/g, '-')
+            .replace(/\//g, '_');
           const dummyToken = `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.${base64Payload}.signature`;
           
           localStorage.setItem('ncp_access_token', dummyToken);
