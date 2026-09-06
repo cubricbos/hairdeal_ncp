@@ -27,7 +27,7 @@ export const SiteProvider = ({ children }: { children: ReactNode }) => {
         if (cached) {
           const parsed = JSON.parse(cached);
           const mergedCache = { ...defaultSiteSettings, ...parsed };
-          if (mergedCache.features) {
+          if (mergedCache.features && (!mergedCache.features.items || mergedCache.features.items.length === 0)) {
              mergedCache.features.items = defaultSiteSettings.features.items;
           }
           return mergedCache;
@@ -87,8 +87,8 @@ export const SiteProvider = ({ children }: { children: ReactNode }) => {
              }
            });
 
-           // Force update features
-           if (merged.features) {
+           // Merge features items safely, defaulting if empty
+           if (merged.features && (!merged.features.items || merged.features.items.length === 0)) {
              merged.features.items = defaultSiteSettings.features.items;
            }
            setSettings(merged);

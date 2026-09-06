@@ -408,6 +408,7 @@ const SortableFeatureCard = ({
                 아이콘
               </label>
               <button
+                type="button"
                 className="w-12 h-12 bg-white rounded-xl flex items-center justify-center border border-gray-200 hover:border-brand-primary hover:text-brand-primary hover:shadow-md transition-all group"
                 title="아이콘 변경"
               >
@@ -434,6 +435,7 @@ const SortableFeatureCard = ({
                   onChange={(e) => onUpdate(idx, "title", e.target.value)}
                 />
                 <button
+                  type="button"
                   onClick={() => onDelete(idx)}
                   className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors border border-transparent hover:border-red-100 shrink-0"
                   title="삭제"
@@ -1671,7 +1673,8 @@ ${currentHtml}`;
     key: keyof SiteSettings["features"]["items"][0],
     value: any,
   ) => {
-    const newItems = [...draft.features.items];
+    const currentItems = draft.features?.items || [];
+    const newItems = [...currentItems];
     newItems[index] = { ...newItems[index], [key]: value };
     setDraft({ ...draft, features: { ...draft.features, items: newItems } });
   };
@@ -1684,11 +1687,13 @@ ${currentHtml}`;
       title: '새로운 기능',
       description: '새로운 기능에 대한 설명을 입력하세요.'
     };
-    setDraft({ ...draft, features: { ...draft.features, items: [...draft.features.items, newItem] } });
+    const currentItems = draft.features?.items || [];
+    setDraft({ ...draft, features: { ...draft.features, items: [...currentItems, newItem] } });
   };
 
   const deleteFeatureItem = (index: number) => {
-    const newItems = draft.features.items.filter((_, i) => i !== index);
+    const currentItems = draft.features?.items || [];
+    const newItems = currentItems.filter((_, i) => i !== index);
     setDraft({ ...draft, features: { ...draft.features, items: newItems } });
   };
 
@@ -3122,6 +3127,7 @@ ${currentHtml}`;
                     (Features) 리스트
                   </h3>
                   <button
+                    type="button"
                     onClick={addFeatureItem}
                     className="flex items-center gap-2 px-3 py-1.5 text-sm font-bold text-brand-primary bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors border border-indigo-100"
                   >
