@@ -168,14 +168,14 @@ export default function Hero() {
           )}
 
           <h1 
-            className={`text-5xl sm:text-6xl lg:text-7xl xl:text-8xl font-[900] leading-[1.05] tracking-[-0.05em] ${!hero.titleColor ? 'text-text-dark' : ''}`}
+            className={`text-5xl sm:text-6xl lg:text-7xl xl:text-8xl font-[900] leading-[1.05] tracking-[-0.05em] ${!hero.titleColor ? 'text-white' : ''}`}
             style={hero.titleColor ? { color: hero.titleColor } : undefined}
             dangerouslySetInnerHTML={{ __html: hero.title }}
           />
 
           <div className="space-y-6">
             <p 
-              className={`text-xl sm:text-2xl font-medium leading-relaxed max-w-2xl text-center ${!hero.subtitleColor ? 'text-text-light' : ''}`}
+              className={`text-xl sm:text-2xl font-medium leading-relaxed max-w-2xl text-center ${!hero.subtitleColor ? 'text-gray-300' : ''}`}
               style={hero.subtitleColor ? { color: hero.subtitleColor } : undefined}
               dangerouslySetInnerHTML={{ __html: hero.subtitle.replace(/\\n/g, '<br/>') }}
             />
@@ -237,11 +237,11 @@ export default function Hero() {
           >
             {hero.metrics.showVisits && (
               <div className="flex flex-col items-center">
-                <span className={`text-xl font-black ${!hero.metricsColor ? 'text-text-dark' : ''}`}>
+                <span className={`text-xl font-black ${!hero.metricsColor ? 'text-white' : ''}`}>
                   <Counter value={metrics ? (metrics.totalVisits >= 1000 ? metrics.totalVisits / 1000 : metrics.totalVisits) : 120} />
                   {metrics && metrics.totalVisits < 1000 ? '' : 'k+'}
                 </span>
-                <span className={`text-[10px] uppercase font-bold tracking-widest ${!hero.metricsColor ? 'text-text-light' : 'opacity-80'}`}>Total Visits</span>
+                <span className={`text-[10px] uppercase font-bold tracking-widest ${!hero.metricsColor ? 'text-gray-400' : 'opacity-80'}`}>Total Visits</span>
               </div>
             )}
 
@@ -251,10 +251,10 @@ export default function Hero() {
 
             {hero.metrics.showToday && (
               <div className="flex flex-col items-center">
-                <span className={`text-xl font-black ${!hero.metricsColor ? 'text-text-dark' : ''}`}>
+                <span className={`text-xl font-black ${!hero.metricsColor ? 'text-white' : ''}`}>
                   <Counter value={metrics ? metrics.todayVisits : 124} />
                 </span>
-                <span className={`text-[10px] uppercase font-bold tracking-widest ${!hero.metricsColor ? 'text-text-light' : 'opacity-80'}`}>Today</span>
+                <span className={`text-[10px] uppercase font-bold tracking-widest ${!hero.metricsColor ? 'text-gray-400' : 'opacity-80'}`}>Today</span>
               </div>
             )}
             
@@ -264,11 +264,11 @@ export default function Hero() {
 
             {hero.metrics.showUsers && (
               <div className="flex flex-col items-center">
-                <span className={`text-xl font-black ${!hero.metricsColor ? 'text-text-dark' : ''}`}>
+                <span className={`text-xl font-black ${!hero.metricsColor ? 'text-white' : ''}`}>
                   <Counter value={metrics ? (metrics.totalUsers >= 1000 ? metrics.totalUsers / 1000 : metrics.totalUsers) : 15} />
                   {metrics && metrics.totalUsers < 1000 ? '' : 'k+'}
                 </span>
-                <span className={`text-[10px] uppercase font-bold tracking-widest ${!hero.metricsColor ? 'text-text-light' : 'opacity-80'}`}>Total Users</span>
+                <span className={`text-[10px] uppercase font-bold tracking-widest ${!hero.metricsColor ? 'text-gray-400' : 'opacity-80'}`}>Total Users</span>
               </div>
             )}
 
@@ -278,11 +278,11 @@ export default function Hero() {
 
             {hero.metrics.showActive && (
               <div className="flex flex-col items-center">
-                <span className={`text-xl font-black ${!hero.metricsColor ? 'text-text-dark' : ''}`}>
+                <span className={`text-xl font-black ${!hero.metricsColor ? 'text-white' : ''}`}>
                   <Counter value={metrics ? (metrics.activeUsers >= 1000 ? metrics.activeUsers / 1000 : metrics.activeUsers) : 2.4} decimals={metrics && metrics.activeUsers < 1000 ? 0 : 1} />
                   {metrics && metrics.activeUsers < 1000 ? '' : 'k+'}
                 </span>
-                <span className={`text-[10px] uppercase font-bold tracking-widest ${!hero.metricsColor ? 'text-text-light' : 'opacity-80'}`}>Active Users</span>
+                <span className={`text-[10px] uppercase font-bold tracking-widest ${!hero.metricsColor ? 'text-gray-400' : 'opacity-80'}`}>Active Users</span>
               </div>
             )}
 
@@ -292,10 +292,10 @@ export default function Hero() {
 
             {hero.metrics.showSatisfaction && (
               <div className="flex flex-col items-center">
-                <span className={`text-xl font-black ${!hero.metricsColor ? 'text-text-dark' : ''}`}>
+                <span className={`text-xl font-black ${!hero.metricsColor ? 'text-white' : ''}`}>
                   <Counter value={98} />%
                 </span>
-                <span className={`text-[10px] uppercase font-bold tracking-widest ${!hero.metricsColor ? 'text-text-light' : 'opacity-80'}`}>Satisfaction</span>
+                <span className={`text-[10px] uppercase font-bold tracking-widest ${!hero.metricsColor ? 'text-gray-400' : 'opacity-80'}`}>Satisfaction</span>
               </div>
             )}
           </div>
