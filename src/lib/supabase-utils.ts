@@ -19,9 +19,11 @@ export async function retryPromise<T>(
       }
       lastResult = result;
       console.warn(`[Retry] Attempt ${attempt} failed with error:`, (result as any).error?.message || (result as any).error);
-    } catch (err) {
+    } catch (err: any) {
       console.warn(`[Retry] Attempt ${attempt} caught exception:`, err);
-      if (attempt === maxAttempts) throw err;
+      if (err?.message === 'Failed to fetch' || err?.message?.includes('network') || attempt === maxAttempts) {
+        throw err;
+      }
     }
     
     if (attempt < maxAttempts) {
@@ -40,7 +42,19 @@ export async function retrySupabaseSelect<T>(
   maxAttempts: number = 3,
   delayMs: number = 1000
 ): Promise<PostgrestResponse<T> | PostgrestSingleResponse<T>> {
-  return retryPromise(queryFn, maxAttempts, delayMs);
+  return retryPromise(queryFn, maxAttempts, delayMs, (res: any) => {
+    if (!res.error) return false;
+    
+    const code = res.error.code;
+    const msg = res.error.message || '';
+    
+    // Do not retry on Auth errors, Missing Rows, or Missing Tables
+    if (code === 'PGRST116' || code === '42P01' || code === '42501' || msg.includes('JWT') || msg.includes('key') || msg.includes('Failed to fetch')) {
+      return false;
+    }
+    
+    return true; // Retry on actual transient errors
+  });
 }
 
 /**
