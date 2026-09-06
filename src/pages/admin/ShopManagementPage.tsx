@@ -81,7 +81,7 @@ export default function ShopManagementPage({ user }: { user: User | null }) {
   const [isPlusMember, setIsPlusMember] = useState(false);
   const [pushStatus, setPushStatus] = useState('Not Supported');
   const [isGeneratingAI, setIsGeneratingAI] = useState(false);
-  const [activeTab, setActiveTab] = useState<'settings' | 'orders'>('settings');
+  const [activeTab, setActiveTab] = useState<'settings' | 'orders' | 'qr'>('settings');
   const [clearTableTarget, setClearTableTarget] = useState<number | null>(null);
   const [requests, setRequests] = useState<any[]>([]);
   const [notificationSound, setNotificationSound] = useState(() => localStorage.getItem('admin_noti_sound') || '1');
@@ -344,6 +344,11 @@ export default function ShopManagementPage({ user }: { user: User | null }) {
             theme_id: shops[0].theme_id || 'purple',
             logo_url: shops[0].logo_url || ''
           });
+        }
+        
+        // UI 즉시 렌더링을 위해 외부 서버(NCP) 호출 전에 Loading을 해제합니다.
+        if (isMounted) {
+          setIsLoading(false);
         }
 
         // NCP Core server sync: load Live Shop Details
@@ -663,27 +668,87 @@ export default function ShopManagementPage({ user }: { user: User | null }) {
           </button>
         </div>
 
-        <div className="flex space-x-1 bg-gray-200 p-1 rounded-xl">
+        <div className="flex space-x-1 bg-gray-100 p-1.5 rounded-2xl border border-gray-200 print:hidden">
           <button
-            className={`flex-1 py-2.5 text-sm font-bold rounded-lg transition-colors ${activeTab === 'settings' ? 'bg-white text-gray-900 shadow' : 'text-gray-600 hover:text-gray-900'}`}
+            className={`flex-1 py-3 text-sm font-bold rounded-xl transition-all duration-200 ${activeTab === 'settings' ? 'bg-white text-gray-900 shadow-sm border border-gray-200/50' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-200/50'}`}
             onClick={() => setActiveTab('settings')}
           >
-            QR 호출 서비스 및 메뉴 설정
+            서비스 및 메뉴 설정
           </button>
           <button
-            className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-bold rounded-lg transition-colors ${activeTab === 'orders' ? 'bg-white text-gray-900 shadow' : 'text-gray-600 hover:text-gray-900'}`}
+            className={`flex-1 py-3 text-sm font-bold rounded-xl transition-all duration-200 ${activeTab === 'qr' ? 'bg-white text-gray-900 shadow-sm border border-gray-200/50' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-200/50'}`}
+            onClick={() => setActiveTab('qr')}
+          >
+            QR코드 생성 및 출력
+          </button>
+          <button
+            className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-bold rounded-xl transition-all duration-200 ${activeTab === 'orders' ? 'bg-white text-gray-900 shadow-sm border border-gray-200/50' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-200/50'}`}
             onClick={() => setActiveTab('orders')}
           >
             실시간 주문 내역
             {requests.filter(r => r.status !== 'completed').length > 0 && (
-              <span className="bg-brand-primary text-white text-xs px-2 py-0.5 rounded-full">
+              <span className="bg-brand-primary text-white text-[10px] px-2 py-0.5 rounded-full shadow-sm">
                 {requests.filter(r => r.status !== 'completed').length}
               </span>
             )}
           </button>
         </div>
 
-        {activeTab === 'orders' ? (
+        
+        {activeTab === 'qr' && shop && (
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 md:p-8 min-h-[400px] print:border-none print:shadow-none print:p-0">
+              <div className="flex items-center justify-between mb-6 border-b pb-4">
+                <h3 className="text-lg font-bold text-gray-900">테이블 QR 코드 생성 및 출력</h3>
+              </div>
+              <div className="flex items-center gap-4 mb-6">
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-1">테이블 수량 (개)</label>
+                  <input type="number" min="1" max="50" className="w-32 p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-primary outline-none"
+                    value={formData.table_count} onChange={(e) => setFormData({...formData, table_count: parseInt(e.target.value) || 0})} />
+                </div>
+                <div className="pt-6">
+                  <button 
+                    onClick={handleSave}
+                    className="bg-brand-primary/10 text-brand-primary font-bold py-3 px-5 rounded-xl hover:bg-brand-primary/20 transition-all text-sm"
+                  >
+                    확인 및 갱신
+                  </button>
+                </div>
+                <div className="pt-6 ml-auto">
+                    <button 
+                      onClick={() => window.print()}
+                      className="flex items-center gap-2 bg-gray-100 text-gray-700 font-bold py-3 px-6 rounded-xl hover:bg-gray-200 transition-all"
+                    >
+                      <QrCode className="w-5 h-5"/> 인쇄하기
+                    </button>
+                </div>
+              </div>
+
+              {formData.table_count > 0 ? (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-6 print:grid-cols-2" id="qr-container">
+                  {Array.from({ length: formData.table_count }).map((_, i) => {
+                    const tableIdx = i + 1;
+                    const destUrl = `${urlPrefix}/m/shop/${shop.id}/${tableIdx}`;
+                    return (
+                      <div key={tableIdx} className="bg-gray-50 border border-gray-200 p-4 rounded-2xl flex flex-col items-center text-center">
+                        <span className="text-xl font-black text-brand-primary mb-3 block">Table {tableIdx}</span>
+                        <div className="bg-white p-2 rounded-xl shadow-sm mb-3">
+                          <QRCodeSVG value={destUrl} size={120} />
+                        </div>
+                        <p className="text-xs text-gray-500 mb-1">{formData.name}</p>
+                        <a href={destUrl} target="_blank" rel="noreferrer" className="text-[10px] text-blue-500 hover:underline break-all">
+                          미리보기
+                        </a>
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : (
+                <p className="text-center text-gray-500 py-10">생성된 QR 코드가 없습니다. 수량을 입력해주세요.</p>
+              )}
+            </div>
+        )}
+      {activeTab === 'orders' && (
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 md:p-8 min-h-[400px]">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 border-b pb-4 gap-4">
               <h3 className="text-lg font-bold text-gray-900">오늘의 고객 요청 현황</h3>
@@ -793,7 +858,8 @@ export default function ShopManagementPage({ user }: { user: User | null }) {
               </div>
             )}
           </div>
-        ) : (
+        )}
+        {activeTab === 'settings' && (
           <>
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 md:p-8">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4 mb-6">
@@ -1241,57 +1307,7 @@ export default function ShopManagementPage({ user }: { user: User | null }) {
               </button>
             </div>
 
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 md:p-8">
-              <div className="flex items-center justify-between mb-6 border-b pb-4">
-                <h3 className="text-lg font-bold text-gray-900">7. 테이블 QR 코드 발급</h3>
-              </div>
-              <div className="flex items-center gap-4 mb-6">
-                <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-1">테이블 수량 (개)</label>
-                  <input type="number" min="1" max="50" className="w-32 p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-primary outline-none"
-                    value={formData.table_count} onChange={(e) => setFormData({...formData, table_count: parseInt(e.target.value) || 0})} />
-                </div>
-                <div className="pt-6">
-                  <button 
-                    onClick={handleSave}
-                    className="bg-brand-primary/10 text-brand-primary font-bold py-3 px-5 rounded-xl hover:bg-brand-primary/20 transition-all text-sm"
-                  >
-                    확인 및 갱신
-                  </button>
-                </div>
-                <div className="pt-6 ml-auto">
-                    <button 
-                      onClick={() => window.print()}
-                      className="flex items-center gap-2 bg-gray-100 text-gray-700 font-bold py-3 px-6 rounded-xl hover:bg-gray-200 transition-all"
-                    >
-                      <QrCode className="w-5 h-5"/> 인쇄하기
-                    </button>
-                </div>
-              </div>
-
-              {formData.table_count > 0 ? (
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-6 print:grid-cols-2" id="qr-container">
-                  {Array.from({ length: formData.table_count }).map((_, i) => {
-                    const tableIdx = i + 1;
-                    const destUrl = `${urlPrefix}/m/shop/${shop.id}/${tableIdx}`;
-                    return (
-                      <div key={tableIdx} className="bg-gray-50 border border-gray-200 p-4 rounded-2xl flex flex-col items-center text-center">
-                        <span className="text-xl font-black text-brand-primary mb-3 block">Table {tableIdx}</span>
-                        <div className="bg-white p-2 rounded-xl shadow-sm mb-3">
-                          <QRCodeSVG value={destUrl} size={120} />
-                        </div>
-                        <p className="text-xs text-gray-500 mb-1">{formData.name}</p>
-                        <a href={destUrl} target="_blank" rel="noreferrer" className="text-[10px] text-blue-500 hover:underline break-all">
-                          미리보기
-                        </a>
-                      </div>
-                    )
-                  })}
-                </div>
-              ) : (
-                <p className="text-center text-gray-500 py-10">생성된 QR 코드가 없습니다. 수량을 입력해주세요.</p>
-              )}
-            </div>
+            
           </>
         )}
         </>
