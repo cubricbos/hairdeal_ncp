@@ -16,13 +16,30 @@ export function useMetrics() {
   const [metrics, setMetrics] = useState<AppMetrics | null>(null);
 
   useEffect(() => {
+    
     const fetchMetrics = async () => {
+      try {
+        const res = await fetch('/api/app-metrics');
+        if (res.ok) {
+          const data = await res.json();
+          setMetrics({
+            totalVisits: Number(data.total_visits),
+            todayVisits: Number(data.today_visits),
+            lastVisitDate: data.last_visit_date,
+            totalUsers: Number(data.total_users),
+            activeUsers: Number(data.active_users),
+          });
+          return data;
+        }
+      } catch(e) {
+        console.warn('Proxy fetch for metrics failed, trying Supabase directly');
+      }
+
       const { data, error } = await supabase
         .from('app_metrics')
         .select('*')
         .eq('id', 1)
         .single();
-
       if (data && !error) {
         setMetrics({
           totalVisits: Number(data.total_visits),
@@ -31,8 +48,11 @@ export function useMetrics() {
           totalUsers: Number(data.total_users),
           activeUsers: Number(data.active_users),
         });
+        return data;
       }
+      return null;
     };
+
 
     // Increment logic via RPC with IP & Daily deduplication
     const incrementVisit = async () => {
@@ -103,11 +123,7 @@ export function useMetrics() {
 
         // 2. Fetch settings - Check if duplication prevention is toggled
         let preventDuplicate = false; // Default to OFF to ensure visits are counted if setting missing
-        const { data: metricsData } = await supabase
-          .from('app_metrics')
-          .select('prevent_duplicate_ip')
-          .eq('id', 1)
-          .single();
+        const metricsData = await fetchMetrics();
         
         if (metricsData && metricsData.prevent_duplicate_ip !== undefined) {
            preventDuplicate = metricsData.prevent_duplicate_ip;
@@ -125,7 +141,13 @@ export function useMetrics() {
         }
 
         // Proceed to increment metrics in db
-        await supabase.rpc('increment_page_visit');
+        
+        try {
+          await fetch('/api/app-metrics/increment', { method: 'POST' });
+        } catch(e) {
+          await supabase.rpc('increment_page_visit');
+        }
+
         
         // Save today and IP locally for deduplication check next time
         localStorage.setItem('last_visit_date', today);

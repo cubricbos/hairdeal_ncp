@@ -3060,7 +3060,7 @@ ${currentHtml}`;
                       <input
                         type="color"
                         className="w-10 h-10 rounded border cursor-pointer shrink-0"
-                        value={draft.hero.metricsColor || "#0b0f19"}
+                        value={draft.hero.metricsColor || "#ffffff"}
                         onChange={(e) => updateHero("metricsColor", e.target.value)}
                       />
                       <input

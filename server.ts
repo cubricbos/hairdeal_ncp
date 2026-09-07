@@ -922,7 +922,7 @@ const getSupabaseAdmin = () => {
   // [VISITOR LOGS API] Handle posting and fetching visitor logs securely with Service Role
   const handleGetVisitorLogs = async (req, res) => {
     try {
-      const admin = getSupabaseAdmin();
+      const admin = getSupabaseAdmin() || supabase;
       if (!admin) {
         return res.status(500).json({ error: 'Supabase admin client not available' });
       }
@@ -948,7 +948,7 @@ const getSupabaseAdmin = () => {
 
   const handlePostVisitorLog = async (req, res) => {
     try {
-      const admin = getSupabaseAdmin();
+      const admin = getSupabaseAdmin() || supabase;
       if (!admin) {
         return res.status(500).json({ error: 'Supabase admin client not available' });
       }
@@ -991,7 +991,33 @@ const getSupabaseAdmin = () => {
     }
   };
 
+
+  app.get('/api/app-metrics', async (req, res) => {
+    try {
+      const admin = getSupabaseAdmin() || supabase;
+      if (!admin) return res.status(500).json({ error: 'No admin client' });
+      const { data, error } = await admin.from('app_metrics').select('*').eq('id', 1).single();
+      if (error) return res.status(500).json({ error: error.message });
+      return res.json(data);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/app-metrics/increment', async (req, res) => {
+    try {
+      const admin = getSupabaseAdmin() || supabase;
+      if (!admin) return res.status(500).json({ error: 'No admin client' });
+      const { data, error } = await admin.rpc('increment_page_visit');
+      if (error) return res.status(500).json({ error: error.message });
+      return res.json({ success: true });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get('/api/visitor_logs', handleGetVisitorLogs);
+
   app.get('/api/visitor-logs', handleGetVisitorLogs);
   app.post('/api/visitor_logs', handlePostVisitorLog);
   app.post('/api/visitor-logs', handlePostVisitorLog);
@@ -2375,7 +2401,7 @@ const getSupabaseAdmin = () => {
   // Proxy endpoint to fetch site settings, bypassing Supabase CORS rules in the browser
   app.get('/api/site-settings', async (req, res) => {
     try {
-      const client = getSupabaseAdmin() || supabase;
+      const client = getSupabaseAdmin();
       if (!client) {
         return res.status(500).json({ error: 'Supabase client not initialized' });
       }
